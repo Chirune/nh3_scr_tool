@@ -1,0 +1,8 @@
+{
+  "catalyst_column": "Sample",
+  "columns": {
+    "T_K": {"property": "temperature", "unit": "K"},
+    "Conversion": {"property": "nox_conversion", "unit": "%"},
+    "GHSV": {"property": "ghsv", "unit": "h^-1"}
+  }
+}

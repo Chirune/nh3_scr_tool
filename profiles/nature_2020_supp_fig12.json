@@ -1,0 +1,26 @@
+{
+  "paper_id": "10.1038/s41467-020-15261-5",
+  "source_sha256": "c1f89e4eb3054a2ba8b065e14de98ad347a831efcc870837440f3e975e20b675",
+  "page": 20,
+  "figure": "Supplementary Fig. 12",
+  "region": [99.0, 91.2, 517.3, 359.6],
+  "caption_bbox": [45, 395, 552, 502],
+  "x": {"property": "temperature", "unit": "°C", "pixel1": 99.05, "pixel2": 286.36, "value1": 200, "value2": 350},
+  "y": {"property": "conversion", "unit": "%", "pixel1": 210.42, "pixel2": 91.25, "value1": 0, "value2": 100},
+  "conditions": {
+    "no_inlet": {"value": 500, "unit": "ppm"},
+    "nh3_inlet": {"value": 500, "unit": "ppm"},
+    "o2_inlet": {"value": 3, "unit": "vol%"},
+    "ghsv": {"value": 66000, "unit": "h^-1"}
+  },
+  "series": [
+    {"catalyst": "Mo1/Fe2O3", "region": [99.0, 91.2, 286.4, 210.5], "exclude": [[122, 112, 137, 126]], "color_key": "stroking_color", "color": [1, 0.502, 0], "width": [5.95, 6.15], "height": [5.95, 6.20], "points": 6, "expected_count": 27, "y": {"property": "no_conversion", "unit": "%", "pixel1": 210.42, "pixel2": 91.25, "value1": 0, "value2": 100}},
+    {"catalyst": "Mo1/Fe2O3", "region": [99.0, 91.2, 286.4, 210.5], "exclude": [[122, 123, 137, 136]], "color_key": "stroking_color", "color": [0, 0, 1], "width": [5.15, 5.40], "height": [5.15, 5.40], "points": 5, "expected_count": 27, "y": {"property": "nh3_conversion", "unit": "%", "pixel1": 210.42, "pixel2": 91.25, "value1": 0, "value2": 100}},
+    {"catalyst": "alpha-Fe2O3", "region": [329.7, 91.2, 516.9, 210.3], "exclude": [[352, 104, 367, 118]], "color_key": "stroking_color", "color": 0, "width": [5.15, 5.40], "height": [5.15, 5.40], "points": 5, "expected_count": 27, "x": {"property": "temperature", "unit": "°C", "pixel1": 329.70, "pixel2": 516.80, "value1": 200, "value2": 350}, "y": {"property": "n2o_concentration", "unit": "ppm", "pixel1": 210.23, "pixel2": 91.22, "value1": 0, "value2": 150}},
+    {"catalyst": "Mo1/Fe2O3", "region": [329.7, 91.2, 516.9, 210.3], "exclude": [[352, 118, 367, 131]], "color_key": "stroking_color", "color": [1, 0, 0], "width": [5.90, 6.15], "height": [5.90, 6.20], "points": 6, "expected_count": 27, "x": {"property": "temperature", "unit": "°C", "pixel1": 329.70, "pixel2": 516.80, "value1": 200, "value2": 350}, "y": {"property": "n2o_concentration", "unit": "ppm", "pixel1": 210.23, "pixel2": 91.22, "value1": 0, "value2": 150}},
+    {"catalyst": "alpha-Fe2O3", "region": [99.1, 240.3, 286.3, 359.4], "exclude": [[218, 322, 233, 335]], "color_key": "stroking_color", "color": 0, "width": [5.15, 5.40], "height": [5.15, 5.40], "points": 5, "expected_count": 27, "y": {"property": "n2_selectivity", "unit": "%", "pixel1": 359.34, "pixel2": 240.34, "value1": 0, "value2": 100}},
+    {"catalyst": "Mo1/Fe2O3", "region": [99.1, 240.3, 286.3, 359.4], "exclude": [[218, 335, 233, 348]], "color_key": "stroking_color", "color": [1, 0, 0], "width": [5.90, 6.15], "height": [5.90, 6.20], "points": 6, "expected_count": 27, "y": {"property": "n2_selectivity", "unit": "%", "pixel1": 359.34, "pixel2": 240.34, "value1": 0, "value2": 100}},
+    {"catalyst": "alpha-Fe2O3", "region": [329.7, 240.2, 517.3, 359.6], "exclude": [[352, 261, 367, 275]], "color_key": "stroking_color", "color": [1, 0.502, 0], "width": [5.95, 6.15], "height": [5.95, 6.20], "points": 6, "expected_count": 27, "x": {"property": "temperature", "unit": "°C", "pixel1": 329.73, "pixel2": 517.25, "value1": 200, "value2": 350}, "y": {"property": "no_conversion", "unit": "%", "pixel1": 359.57, "pixel2": 240.24, "value1": 0, "value2": 100}},
+    {"catalyst": "alpha-Fe2O3", "region": [329.7, 240.2, 517.3, 359.6], "exclude": [[352, 272, 367, 285]], "color_key": "stroking_color", "color": [0, 0, 1], "width": [5.15, 5.40], "height": [5.15, 5.40], "points": 5, "expected_count": 27, "x": {"property": "temperature", "unit": "°C", "pixel1": 329.73, "pixel2": 517.25, "value1": 200, "value2": 350}, "y": {"property": "nh3_conversion", "unit": "%", "pixel1": 359.57, "pixel2": 240.24, "value1": 0, "value2": 100}}
+  ]
+}

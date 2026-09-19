@@ -1,0 +1,5 @@
+{
+  "base_url": "https://YOUR_PROVIDER/v1",
+  "model": "YOUR_MODEL",
+  "api_key_env": "SCR_API_KEY"
+}

@@ -1,0 +1,23 @@
+{
+  "paper_id": "10.1038/s41467-026-72879-7",
+  "source_sha256": "c13fd870be94bf62ae6143e3c4a39460751cbdda2bf945eed95b132886a85876",
+  "page": 3,
+  "figure": "Fig.1a",
+  "region": [178, 65, 423, 272],
+  "exclude": [[347, 214, 423, 268]],
+  "caption_bbox": [39, 606, 563, 652],
+  "x": {"property": "temperature", "unit": "degC", "pixel1": 182.743, "pixel2": 418.862, "value1": 100, "value2": 500},
+  "y": {"property": "nox_conversion", "unit": "%", "pixel1": 268.368, "pixel2": 66.57, "value1": 0, "value2": 100},
+  "conditions": {
+    "no_inlet": {"value": 350, "unit": "ppm"},
+    "o2_inlet": {"value": 10, "unit": "%"},
+    "h2o_inlet": {"value": 3, "unit": "%"},
+    "ghsv": {"value": 150000, "unit": "h^-1"},
+    "anr": {"value": 1, "unit": "1"}
+  },
+  "series": [
+    {"catalyst": "Cu-0.5", "object": "curves", "color": [1, 0, 0], "width": [6.60, 6.66], "height": [6.60, 6.66], "expected_count": 16},
+    {"catalyst": "Cu-1.4", "object": "curves", "color": [0.52549, 0.52549, 0.52549], "width": [7.34, 7.39], "height": [6.4, 7.39], "points": 5, "expected_count": 15},
+    {"catalyst": "Cu-2.5", "object": "rects", "color": [0.13333, 0.44314, 1], "width": [6.60, 6.66], "height": [6.60, 6.66], "expected_count": 15}
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "x": {"property": "temperature", "unit": "degC", "pixel1": 100, "pixel2": 500, "value1": 100, "value2": 500, "scale": "linear"},
+  "y": {"property": "nox_conversion", "unit": "%", "pixel1": 400, "pixel2": 100, "value1": 0, "value2": 100, "scale": "linear"}
+}

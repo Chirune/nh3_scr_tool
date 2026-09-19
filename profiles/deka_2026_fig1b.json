@@ -1,0 +1,24 @@
+{
+  "paper_id": "10.1038/s41467-026-72879-7",
+  "source_sha256": "c13fd870be94bf62ae6143e3c4a39460751cbdda2bf945eed95b132886a85876",
+  "page": 3,
+  "figure": "Fig.1b",
+  "region": [179, 327, 422, 531],
+  "caption_bbox": [39, 606, 563, 652],
+  "x": {"property": "anr", "unit": "1", "pixel1": 182.817, "pixel2": 420.114, "value1": 0.1, "value2": 1.6},
+  "y": {"property": "nox_conversion", "unit": "%", "pixel1": 528.566, "pixel2": 329.421, "value1": 0, "value2": 100},
+  "conditions": {
+    "no_inlet": {"value": 350, "unit": "ppm"},
+    "o2_inlet": {"value": 10, "unit": "%"},
+    "h2o_inlet": {"value": 3, "unit": "%"},
+    "ghsv": {"value": 150000, "unit": "h^-1"}
+  },
+  "series": [
+    {"catalyst": "Cu-1.4", "object": "rects", "color": [0.52549, 0.52549, 0.52549], "width": [6, 6.1], "height": [6, 6.1], "conditions": {"temperature": {"value": 220, "unit": "degC"}}},
+    {"catalyst": "Cu-1.4", "object": "curves", "color": [0.52549, 0.52549, 0.52549], "width": [6.7, 6.85], "height": [6.7, 6.85], "points": 6, "conditions": {"temperature": {"value": 200, "unit": "degC"}}},
+    {"catalyst": "Cu-1.4", "object": "curves", "color": [0.52549, 0.52549, 0.52549], "width": [7.3, 7.4], "height": [7.3, 7.4], "points": 5, "conditions": {"temperature": {"value": 160, "unit": "degC"}}},
+    {"catalyst": "Cu-0.5", "object": "rects", "color": [1, 1, 1], "width": [5.8, 6], "height": [5.8, 6], "conditions": {"temperature": {"value": 220, "unit": "degC"}}, "y": {"property": "nox_conversion", "unit": "%", "pixel1": 528.566, "pixel2": 329.421, "value1": 5, "value2": 30}},
+    {"catalyst": "Cu-0.5", "object": "curves", "color": [1, 1, 1], "width": [5.8, 6], "height": [5.8, 6], "points": 6, "conditions": {"temperature": {"value": 200, "unit": "degC"}}, "y": {"property": "nox_conversion", "unit": "%", "pixel1": 528.566, "pixel2": 329.421, "value1": 5, "value2": 30}},
+    {"catalyst": "Cu-0.5", "object": "curves", "color": [1, 1, 1], "width": [6.7, 6.85], "height": [6.7, 6.85], "points": 5, "conditions": {"temperature": {"value": 175, "unit": "degC"}}, "y": {"property": "nox_conversion", "unit": "%", "pixel1": 528.566, "pixel2": 329.421, "value1": 5, "value2": 30}}
+  ]
+}

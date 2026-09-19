@@ -1,0 +1,29 @@
+{
+  "paper_id": "10.1038/s41467-020-15261-5",
+  "source_sha256": "c1f89e4eb3054a2ba8b065e14de98ad347a831efcc870837440f3e975e20b675",
+  "page": 21,
+  "figure": "Supplementary Fig. 13",
+  "region": [136.72, 106.67, 477.56, 321.03],
+  "caption_bbox": [45, 386, 552, 448],
+  "x": {
+    "property": "time_on_stream",
+    "unit": "h",
+    "segments": [
+      {"pixel1": 136.72, "pixel2": 304.18, "value1": 0, "value2": 7},
+      {"pixel1": 310.00, "pixel2": 477.56, "value1": 13, "value2": 20}
+    ]
+  },
+  "y": {"property": "no_conversion", "unit": "%", "pixel1": 321.03, "pixel2": 106.67, "value1": 0, "value2": 100},
+  "conditions": {
+    "temperature": {"value": 300, "unit": "°C"},
+    "no_inlet": {"value": 500, "unit": "ppm"},
+    "nh3_inlet": {"value": 500, "unit": "ppm"},
+    "o2_inlet": {"value": 3, "unit": "vol%"},
+    "ghsv": {"value": 66000, "unit": "h^-1"}
+  },
+  "series": [
+    {"catalyst": "Mo1/Fe2O3 | SO2", "color_key": "stroking_color", "color": [1, 0, 0], "width": [9.45, 9.70], "height": [9.40, 9.70], "points": 6, "exclude": [[258, 212, 276, 230]], "expected_count": 17, "conditions": {"so2_inlet": {"value": 200, "unit": "ppm"}, "h2o_inlet": {"value": 0, "unit": "vol%"}}},
+    {"catalyst": "Mo1/Fe2O3 | H2O", "color_key": "stroking_color", "color": [0, 0, 1], "width": [8.30, 8.55], "height": [8.25, 8.55], "points": 5, "exclude": [[258, 241, 276, 258]], "expected_count": 22, "conditions": {"so2_inlet": {"value": 0, "unit": "ppm"}, "h2o_inlet": {"value": 5, "unit": "vol%"}}},
+    {"catalyst": "Mo1/Fe2O3 | SO2 + H2O", "color_key": "stroking_color", "color": [1, 0.502, 0], "width": [11.10, 11.45], "height": [11.10, 11.45], "points": 5, "exclude": [[257, 267, 276, 286]], "expected_count": 20, "conditions": {"so2_inlet": {"value": 200, "unit": "ppm"}, "h2o_inlet": {"value": 5, "unit": "vol%"}}}
+  ]
+}

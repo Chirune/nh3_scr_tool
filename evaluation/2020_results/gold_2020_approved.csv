@@ -1,0 +1,25 @@
+﻿row_id,source_locator,catalyst,field,value,unit,context_or_qualifier,evidence_level,expert_decision,expert_note,字段说明（中文）,符号与审核提示
+G001,main PDF page 2-3; Fig.1g-h,Mo1/Fe2O3,active_site_type,dinuclear Mo1-Fe1,,isolated Mo with adjacent surface Fe,author_identification,approve,,活性中心类型：相邻的单原子 Mo 与表面 Fe 构成双核位点。,定性字段；判断作者是否给出了足够证据。
+G002,main PDF page 2; Fig.1h,Mo1/Fe2O3,active_site_distance,2.9,Å,Mo-Fe distance in structural model,structure_model,approve,,结构模型中的 Mo-Fe 活性位距离。,Å 是埃，1 Å = 0.1 nm。
+G003,supplementary page 7; Table 1,Mo1/Fe2O3,coordination_number,6,1,Mo-O shell,EXAFS_fit,approve,,EXAFS 拟合得到的 Mo-O 配位数。,CN 是配位数。
+G004,supplementary page 7; Table 1,Mo1/Fe2O3,bond_distance,1.88(7),Å,Mo-O shell,EXAFS_fit,approve,,EXAFS 拟合得到的 Mo-O 键长。,1.88(7) 表示中心值 1.88 Å，括号为末位不确定度。
+G005,supplementary page 7; Table 1,Mo1/Fe2O3,coordination_number,1,1,first Mo-Fe shell,EXAFS_fit,approve,,EXAFS 拟合的第一组 Mo-Fe 配位数。,需与壳层和键长成组保留。
+G006,supplementary page 7; Table 1,Mo1/Fe2O3,bond_distance,2.86(4),Å,first Mo-Fe shell,EXAFS_fit,approve,,EXAFS 拟合的第一组 Mo-Fe 距离。,Å 是埃，1 Å = 0.1 nm。
+G007,supplementary page 7; Table 1,Mo1/Fe2O3,coordination_number,3,1,second Mo-Fe shell,EXAFS_fit,approve,,EXAFS 拟合的第二组 Mo-Fe 配位数。,需与壳层和键长成组保留。
+G008,supplementary page 7; Table 1,Mo1/Fe2O3,bond_distance,2.93(7),Å,second Mo-Fe shell,EXAFS_fit,approve,,EXAFS 拟合的第二组 Mo-Fe 距离。,Å 是埃，1 Å = 0.1 nm。
+G009,main PDF page 3; Fig.2b; Supplementary Fig.7,Mo1/Fe2O3,mo_oxidation_state,5,+,XANES interpretation supported by XPS,characterization_supported,approve,,Mo 的氧化态为 +5。作者根据 XANES 峰面积判断，并用 Mo 3d XPS 佐证。,数值 5 与单位 + 合起来表示 Mo⁵⁺；证据等级是“多种表征支持”。
+G010,main PDF page 3; Supplementary Fig.9-10,Mo1/Fe2O3,acid_site_type,Brønsted-to-Lewis,,MoO6H site under SCR conditions,author_interpretation,approve,,酸位类型：MoO6H 提供 Brønsted 酸位，作者认为其在 SCR 温度下可转为 Lewis 酸位。,这是作者的机理解释，不是一个连续数值。
+G011,main PDF page 3; Fig.1 caption,Mo1/Fe2O3,mo_loading,1.3,wt%,relative to alpha-Fe2O3,XRF_reported,approve,,相对于 α-Fe2O3 的 Mo 质量负载量。,wt% 表示质量百分数。
+G012,main PDF page 3; Fig.3b,Mo1/Fe2O3,apparent_activation_energy,86 ± 4,kJ/mol,different Mo loadings,derived_from_arrhenius,approve,,表观活化能及其报告误差。,86 ± 4 表示中心值 86、误差 4 kJ/mol。
+G013,main PDF page 3; Supplementary Fig.17,Mo1/Fe2O3,turnover_frequency,~1.7e-3,s^-1,270 degC; converted NO per ACS,calculated_by_authors,approve,,单位活性中心每秒转化的 NO 分子数。,~ 表示近似值；TOF 约为 1.7×10⁻³ s⁻¹。
+G014,main PDF page 6; Catalytic evaluations,all activity samples,pressure,atmospheric,,standard activity measurement,reported_condition,approve,,标准活性评价在大气压力下进行。,保留为报告条件；不自动换算为精确压力。
+G015,main PDF page 6; Catalytic evaluations,all activity samples,no_inlet,500,ppm,standard activity measurement,reported_condition,approve,,入口 NO 浓度。,属于标准活性评价条件。
+G016,main PDF page 6; Catalytic evaluations,all activity samples,nh3_inlet,500,ppm,standard activity measurement,reported_condition,approve,,入口 NH3 浓度。,属于标准活性评价条件。
+G017,main PDF page 6; Catalytic evaluations,all activity samples,o2_inlet,3,vol%,standard activity measurement,reported_condition,approve,,入口 O2 体积分数。,vol% 表示体积百分数。
+G018,main PDF page 6; Catalytic evaluations,all activity samples,ghsv,800000,h^-1,standard activity measurement,reported_condition,approve,,标准活性评价的气体体积空速。,单位 h⁻¹。
+G019,main PDF page 6; durability method,Mo1/Fe2O3,temperature,300,degC,H2O/SO2 durability,reported_condition,approve,,耐水、耐硫实验温度。,与标准升温活性曲线不是同一实验。
+G020,main PDF page 6; durability method,Mo1/Fe2O3,so2_inlet,200,ppm,when SO2 is used,reported_condition,approve,,耐硫实验使用的入口 SO2 浓度。,只在加入 SO2 的阶段适用。
+G021,main PDF page 6; durability method,Mo1/Fe2O3,h2o_inlet,5,vol%,when H2O is used,reported_condition,approve,,耐水实验使用的入口 H2O 体积分数。,只在加入 H2O 的阶段适用。
+G022,supplementary Fig.11,Mo1/Fe2O3 series,no_conversion_curve,,,different Mo loadings; requires curve digitization,figure_data,approve,,补充图 11：不同 Mo 负载量及对照样的 NO 转化率-温度曲线。,PDF 为矢量图，将使用自动标记读取工具。
+G023,supplementary Fig.12,Mo1/Fe2O3 and alpha-Fe2O3,n2_selectivity_curve,,,GHSV 66000 h^-1; requires curve digitization,figure_data,approve,,补充图 12：转化率、N2O 和 N2 选择性四个子图。,PDF 为矢量图；每个子图和坐标轴分别标定。
+G024,supplementary Fig.13,Mo1/Fe2O3,durability_curve,,,H2O/SO2 at 300 degC; requires curve digitization,figure_data,approve,,补充图 13：加入 H2O/SO2 前后，NO 转化率随时间变化。,PDF 为矢量图；断轴和加入/切断时间需要单独处理。

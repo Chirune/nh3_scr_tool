@@ -1,0 +1,12 @@
+{
+  "paper_id": "10.1038/s41467-020-15261-5",
+  "approved_gold_items": 24,
+  "covered": 9,
+  "partial": 1,
+  "missing": 14,
+  "strict_gold_coverage": 0.375,
+  "precision": null,
+  "precision_note": "Not computed: this gold set is not an exhaustive list of all valid observations.",
+  "curve_point_accuracy": null,
+  "curve_point_accuracy_note": "G022-G024 approve curve sources/categories, not each digitized numeric point."
+}
