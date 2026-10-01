@@ -118,10 +118,133 @@ class Project:
         from .scoring import score_record
         for row in rows:
             row.update(score_record(row, self.state.get('score_config')))
+        self._store_browser_captures(paths)
         self.state['last_export'] = None
         write_json(self.folder / 'import_errors.json', errors)
         self.save()
         return len(rows), errors
+
+    def _store_browser_captures(self, paths):
+        """Keep browser-visible article HTML outside project.json, matched to a paper."""
+        from bs4 import BeautifulSoup
+        from .abstract_import import doi as normalize_doi
+
+        by_doi = {normalize_doi(r.get('doi')): r['record_id'] for r in self.state['papers'] if r.get('doi')}
+        by_title = {}
+        for row in self.state['papers']:
+            by_title.setdefault(row['title'].casefold().strip(), []).append(row['record_id'])
+        def local_file(value):
+            if not isinstance(value, str) or not value:
+                return None
+            try:
+                candidate = Path(value)
+                return candidate if candidate.is_file() and candidate.stat().st_size <= 100 * 1024 * 1024 else None
+            except OSError:
+                return None
+        captures = self.state.setdefault('captures', {})
+        for path in paths:
+            path = Path(path)
+            if path.suffix.lower() != '.json':
+                continue
+            try:
+                payload = read_json(path)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(payload, dict) or payload.get('schema') != 'nh3scr-browser-capture-v2':
+                continue
+            for item in payload.get('items', []):
+                if not isinstance(item, dict):
+                    continue
+                capture_doi = normalize_doi(item.get('doi'))
+                identity = by_doi.get(capture_doi)
+                if not identity and not capture_doi:
+                    matches = by_title.get(str(item.get('title') or '').casefold().strip(), [])
+                    identity = matches[0] if len(matches) == 1 else None
+                if not identity:
+                    continue
+                capture = dict(captures.get(identity, {}))
+                raw = item.get('fulltext_html')
+                if isinstance(raw, str) and len(raw) >= 1000:
+                    soup = BeautifulSoup(raw, 'html.parser')
+                    for node in soup.select('script, iframe, object, embed, form'):
+                        node.decompose()
+                    for node in soup.find_all(True):
+                        for attr in list(node.attrs):
+                            if attr.lower().startswith('on'):
+                                del node.attrs[attr]
+                    if len(soup.get_text(' ', strip=True)) >= 1000:
+                        target = self.folder / 'captures' / identity / 'page.html'
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_text(str(soup), encoding='utf-8')
+                        capture['path'] = str(target.relative_to(self.folder))
+                from .harvest import is_valid_pdf
+                pdf = local_file(item.get('downloaded_pdf_path'))
+                if pdf and is_valid_pdf(pdf):
+                    target = self.folder / 'captures' / identity / 'browser.pdf'
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(pdf, target)
+                    capture['pdf_path'] = str(target.relative_to(self.folder))
+                supplements = []
+                raw_supplements = item.get('downloaded_supplement_paths')
+                for index, raw_path in enumerate(raw_supplements if isinstance(raw_supplements, list) else []):
+                    source = local_file(raw_path)
+                    if not source or (source.suffix.lower() == '.pdf' and not is_valid_pdf(source)):
+                        continue
+                    target = self.folder / 'captures' / identity / 'supplement' / f'{index:02d}_{source.name}'
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+                    supplements.append(str(target.relative_to(self.folder)))
+                if supplements:
+                    capture['supplement_paths'] = supplements
+                figures = []
+                raw_figures = item.get('downloaded_figure_paths')
+                image_types = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp'}
+                for index, raw_path in enumerate(raw_figures if isinstance(raw_figures, list) else []):
+                    source = local_file(raw_path)
+                    if not source or source.suffix.lower() not in image_types:
+                        continue
+                    target = self.folder / 'captures' / identity / 'figures' / f'{index:02d}_{source.name}'
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+                    figures.append(str(target.relative_to(self.folder)))
+                if figures:
+                    capture['figure_paths'] = figures
+                if (capture.get('path') or capture.get('pdf_path') or
+                        capture.get('supplement_paths') or capture.get('figure_paths')):
+                    capture['source_url'] = item.get('landing_page_url') or item.get('abstract_url') or ''
+                    capture['captured_at'] = item.get('captured_at') or ''
+                    captures[identity] = capture
+
+    def attach_browser_capture(self, identity):
+        """Promote a captured page only after the reader has kept the paper."""
+        if self.paper(identity).get('human_decision') != 'target':
+            raise ValueError('先在第 2 步人工确认保留这篇论文。')
+        capture = self.state.get('captures', {}).get(identity)
+        if not capture:
+            raise ValueError('这篇论文还没有可用的浏览器全文采集。请在可见正文的网页重新使用插件。')
+        source = None
+        if not any(item['role'] == 'primary' for item in self.state['attachments'].get(identity, [])):
+            from .harvest import is_valid_pdf
+            pdf = self.folder / capture['pdf_path'] if capture.get('pdf_path') else None
+            html = self.folder / capture['path'] if capture.get('path') else None
+            source = pdf if pdf and is_valid_pdf(pdf) else html if html and html.exists() else None
+            if source:
+                self.attach(identity, [source], 'primary')
+        self._attach_capture_supplements(identity, capture)
+        if not source and not capture.get('supplement_paths') and not capture.get('figure_paths'):
+            raise ValueError('浏览器采集文件不存在，或这篇论文已经有正文文件。')
+        return source
+
+    def _attach_capture_supplements(self, identity, capture):
+        existing = {item['original'] for item in self.state['attachments'].get(identity, [])}
+        supported = {'.pdf', '.html', '.htm', '.txt', '.md', '.csv', '.tsv', '.xlsx',
+                     '.json', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp'}
+        paths = [self.folder / path for path in
+                 capture.get('supplement_paths', []) + capture.get('figure_paths', [])]
+        paths = [path for path in paths if path.is_file() and path.suffix.lower() in supported
+                 and str(path) not in existing]
+        if paths:
+            self.attach(identity, paths, 'supplement')
 
     def search_online(self, query, sources, *, limit=20, email=None, openalex_key=None,
                       elsevier_key=None, elsevier_insttoken=None, springer_key=None):
@@ -304,7 +427,7 @@ class Project:
         self.save()
 
     def acquire_primary(self, identity, *, email=None, openalex_key=None, elsevier_key=None,
-                        elsevier_insttoken=None, springer_key=None):
+                        elsevier_insttoken=None, springer_key=None, skip_semantic=False):
         """Find a PDF by DOI and attach it only to the selected, approved paper."""
         paper = self.paper(identity)
         if paper.get('human_decision') != 'target':
@@ -313,12 +436,31 @@ class Project:
             return {'status': 'already_attached', 'source': None, 'url': None,
                     'errors': [], 'path': None}
         from .fulltext import acquire_pdf, publisher_route
+        from .harvest import is_valid_pdf
         destination = self.folder / 'downloads' / identity / 'primary.pdf'
-        result = acquire_pdf(paper, destination, email=email, openalex_key=openalex_key,
-                             elsevier_key=elsevier_key, elsevier_insttoken=elsevier_insttoken,
-                             springer_key=springer_key)
+        capture = self.state.get('captures', {}).get(identity, {})
+        browser_pdf = self.folder / capture['pdf_path'] if capture.get('pdf_path') else None
+        prefetched = self.state.get('prefetch', {}).get(identity, {})
+        cached = self.folder / prefetched['path'] if prefetched.get('path') else None
+        if browser_pdf and is_valid_pdf(browser_pdf):
+            destination = browser_pdf
+            result = {'status': 'cached_pdf', 'path': str(browser_pdf),
+                      'source': 'Chrome 插件下载', 'url': capture.get('source_url'),
+                      'errors': [], 'message': '已从浏览器下载文件中添加正文，请核对标题和 DOI。'}
+        elif cached and is_valid_pdf(cached):
+            destination = cached
+            result = {'status': 'cached_pdf', 'path': str(cached),
+                      'source': prefetched.get('source') or '批量预取',
+                      'url': prefetched.get('url'), 'errors': [],
+                      'message': '已从批量预取材料中添加正文，请核对论文身份。'}
+        else:
+            result = acquire_pdf(paper, destination, email=email, openalex_key=openalex_key,
+                                 elsevier_key=elsevier_key, elsevier_insttoken=elsevier_insttoken,
+                                 springer_key=springer_key, skip_semantic=skip_semantic)
         if result.get('path'):
             self.attach(identity, [destination], 'primary')
+            if browser_pdf and destination == browser_pdf:
+                self._attach_capture_supplements(identity, capture)
         self.state.setdefault('acquisition', {})[identity] = {
             'status': result['status'], 'source': result.get('source'),
             'url': result.get('url'), 'errors': result.get('errors', []),
@@ -331,6 +473,83 @@ class Project:
                                       'status': result['status'], 'time': datetime.now().isoformat()})
         self.save()
         return result
+
+    def prefetch_screened(self, *, limit=15, progress=None, should_stop=None, **credentials):
+        """Download promising unreviewed papers without admitting them as source material."""
+        if not 1 <= limit <= 100:
+            raise ValueError('每批预取数量需为 1–100 篇。')
+        from .fulltext import acquire_pdf
+        candidates = sorted((r for r in self.state['papers']
+            if r.get('effective_decision') == 'target'
+            and r.get('human_decision') not in {'target', 'non_target'}
+            and r['record_id'] not in self.state.get('prefetch', {})),
+            key=lambda r: -r.get('priority_score', 0))[:limit]
+        if not candidates:
+            raise ValueError('没有尚未尝试的初筛相关论文。可先在线检索或核对现有论文。')
+        report = self.folder / '批量预取_最近一次.csv'
+        columns = ['doi', 'title', 'result', 'source', 'message']
+        rows = []
+        for index, paper in enumerate(candidates, 1):
+            if should_stop and should_stop():
+                break
+            identity = paper['record_id']
+            destination = self.folder / 'prefetch' / identity / 'primary.pdf'
+            try:
+                result = acquire_pdf(paper, destination, skip_semantic=True, **credentials)
+                state = '已预取待核对' if result.get('path') else '未获取'
+                message = result.get('message') or ''
+                source = result.get('source') or ''
+                url = result.get('url')
+                path = str(destination.relative_to(self.folder)) if result.get('path') else None
+            except Exception as exc:
+                from .harvest import safe_error
+                state, source, message, url, path = '处理失败', '', safe_error(exc), None, None
+            self.state.setdefault('prefetch', {})[identity] = {
+                'status': state, 'path': path, 'source': source, 'url': url,
+                'message': message, 'time': datetime.now().isoformat()}
+            self.save()
+            rows.append({'doi': paper.get('doi', ''), 'title': paper.get('title', ''),
+                         'result': state, 'source': source, 'message': message})
+            write_csv(report, rows, columns)
+            if progress:
+                progress(index, len(candidates), paper.get('title', ''), state)
+        return {'rows': rows, 'report': str(report), 'stopped': len(rows) < len(candidates),
+                'downloaded': sum(r['result'] == '已预取待核对' for r in rows),
+                'failed': sum(r['result'] != '已预取待核对' for r in rows)}
+
+    def acquire_many(self, identities, *, progress=None, should_stop=None, **credentials):
+        """Try every kept paper in order; one provider failure does not stop the batch."""
+        identities = list(dict.fromkeys(identities))
+        if not identities:
+            raise ValueError('没有待获取正文的已保留论文。')
+        for identity in identities:
+            if self.paper(identity).get('human_decision') != 'target':
+                raise ValueError('批量获取只接受已人工保留的论文。')
+        report = self.folder / '批量正文获取_最近一次.csv'
+        rows = []
+        columns = ['doi', 'title', 'result', 'source', 'message']
+        for index, identity in enumerate(identities, 1):
+            if should_stop and should_stop():
+                break
+            paper = self.paper(identity)
+            try:
+                result = self.acquire_primary(identity, skip_semantic=True, **credentials)
+                state = ('已存在' if result['status'] == 'already_attached' else
+                         '已获取' if result.get('path') else '未获取')
+                message = result.get('message') or ('已绑定正文。' if state == '已存在' else '')
+                source = result.get('source') or ''
+            except Exception as exc:
+                from .harvest import safe_error
+                state, source, message = '处理失败', '', safe_error(exc)
+            rows.append({'doi': paper.get('doi', ''), 'title': paper.get('title', ''),
+                         'result': state, 'source': source, 'message': message})
+            write_csv(report, rows, columns)
+            if progress:
+                progress(index, len(identities), paper.get('title', ''), state)
+        return {'rows': rows, 'report': str(report), 'stopped': len(rows) < len(identities),
+                'downloaded': sum(r['result'] == '已获取' for r in rows),
+                'existing': sum(r['result'] == '已存在' for r in rows),
+                'failed': sum(r['result'] not in {'已获取', '已存在'} for r in rows)}
 
     def extract(self, identities):
         identities = list(identities)

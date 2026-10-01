@@ -39,7 +39,8 @@ def publisher_route(record):
 
 
 def acquire_pdf(record, destination, *, email=None, openalex_key=None, elsevier_key=None,
-                elsevier_insttoken=None, springer_key=None, timeout=20, harvester=None):
+                elsevier_insttoken=None, springer_key=None, skip_semantic=False,
+                timeout=20, harvester=None):
     """Return a source-labelled result; never treat a web page as a PDF."""
     doi = normalize_doi(record.get('doi'))
     if not doi:
@@ -76,8 +77,9 @@ def acquire_pdf(record, destination, *, email=None, openalex_key=None, elsevier_
     sources = [
         ('题录中的 PDF 链接', lambda: record.get('pdf_urls') or []),
         ('OpenAlex', lambda: client.resolve_openalex_doi(doi)),
-        ('Semantic Scholar', lambda: client.resolve_semantic_scholar_doi(doi)),
     ]
+    if not skip_semantic:
+        sources.append(('Semantic Scholar', lambda: client.resolve_semantic_scholar_doi(doi)))
     if route == 'springer_nature' and client.springer_key:
         sources.insert(1, ('Springer Nature 接口', springer_pdf_urls))
     if client.email:

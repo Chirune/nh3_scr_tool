@@ -109,6 +109,12 @@ def metadata_record(item, source):
     if not any(k in item for k in ('title', 'doi', 'DOI', 'abstract', 'abstractNote')):
         raise ValueError('未识别为论文题录，请使用 CSL JSON、RIS 或浏览器采集文件')
     row = dict(item)
+    # Browser captures may contain megabytes of page HTML. The workbench
+    # stores that as a separate source file, never inside the paper list.
+    row.pop('fulltext_html', None)
+    row.pop('downloaded_pdf_path', None)
+    row.pop('downloaded_supplement_paths', None)
+    row.pop('downloaded_figure_paths', None)
     issues = item.get('import_issues') or []
     if isinstance(issues, str):
         try:

@@ -45,8 +45,9 @@ class Workbench:
         self.root=root; self.project=None; self.busy=False; self.events=queue.Queue()
         self.api_credentials={'email':'','openalex_key':'','elsevier_key':'',
                               'elsevier_insttoken':'','springer_key':''}
+        self.batch_stop=threading.Event(); self.batch_running=False
         self.current_source=None; self.current_record=None; self.current_claim=None; self.records=[]; self.missing=[]; self.claims=[]
-        root.title('NH₃-SCR 文献数据工作台 0.7')
+        root.title('NH₃-SCR 文献数据工作台 0.8')
         root.geometry('1280x850'); root.minsize(1020,720)
         style=ttk.Style(root)
         style.theme_use('clam')
@@ -129,10 +130,14 @@ class Workbench:
     def poll(self):
         try:
             kind,done,result=self.events.get_nowait()
-            self.busy=False
-            if kind=='error':
+            if kind=='progress':
+                self.status.set(result)
+            elif kind=='error':
+                self.busy=False
+                self.batch_running=False
                 self.status.set('本次操作未完成，已保存的结果仍在。'); messagebox.showerror('需要处理',result)
             else:
+                self.busy=False
                 self.refresh(); done(result)
         except queue.Empty: pass
         self.root.after(100,self.poll)
@@ -236,6 +241,15 @@ class Workbench:
             ttk.Button(bar,text=label,command=lambda d=decision:self.decide_papers(d)).pack(side='left',padx=3)
         ttk.Button(bar,text='下一步：准备正文',command=lambda:self.tabs.select(2)).pack(side='right')
         ttk.Button(bar,text='评分权重',command=self.score_weights).pack(side='left',padx=5)
+        prefetch=ttk.Frame(page); prefetch.pack(fill='x',pady=(8,0))
+        ttk.Label(prefetch,text='先下载初筛相关论文，每批').pack(side='left')
+        self.prefetch_limit=tk.IntVar(value=15)
+        ttk.Spinbox(prefetch,from_=1,to=100,textvariable=self.prefetch_limit,width=5).pack(side='left',padx=5)
+        ttk.Label(prefetch,text='篇，下载后仍需人工核对').pack(side='left')
+        ttk.Button(prefetch,text='预取下一批',command=self.prefetch_batch,style='Accent.TButton').pack(side='left',padx=8)
+        ttk.Button(prefetch,text='停止批量',command=self.stop_batch).pack(side='left',padx=3)
+        ttk.Button(prefetch,text='打开预取结果',command=self.open_prefetch_report).pack(side='left',padx=3)
+        ttk.Button(prefetch,text='打开所选预取PDF',command=self.open_prefetched_pdf).pack(side='left',padx=3)
         panes=ttk.Panedwindow(page,orient='horizontal'); panes.pack(fill='both',expand=True,pady=8)
         frame,self.paper_table=tree(panes,{'auto':'规则初筛','human':'人工判断','score':'阅读评分','title':'论文题目'},{'auto':75,'human':85,'score':80,'title':420})
         panes.add(frame,weight=1)
@@ -271,6 +285,9 @@ class Workbench:
             prompt+='\n阅读评分：'+str(row['priority_score'])+' / 100；用于排序，未校准。'
             prompt+='\n'+'；'.join(c['label']+' '+str(c['contribution']) for c in row['score_components'].values())
             if row.get('score_basis')=='title_keywords_only':prompt+='\n缺少完整摘要，本次评分仅依据题名和关键词。'
+        prefetched=self.project.state.get('prefetch',{}).get(ids[0])
+        if prefetched:
+            prompt+='\n批量预取：'+prefetched['status']+'。下载成功也仍需人工核对和保留。'
         self.paper_preview.show({'text':row['title']+'\nDOI：'+row['doi']+'\n\n'+(row['abstract'] or '未取得摘要。请打开论文网页核对。'),'locator':'原文摘要'},prompt)
 
     def decide_papers(self,decision):
@@ -286,12 +303,49 @@ class Workbench:
             row=self.project.paper(ids[0]); url=('https://doi.org/'+row['doi']) if row['doi'] else row.get('abstract_url','')
             if url.startswith(('https://','http://')):webbrowser.open(url)
 
+    def prefetch_batch(self):
+        if not self.guarded() or not self.project:return
+        try:
+            limit=int(self.prefetch_limit.get())
+            if not 1<=limit<=100:raise ValueError()
+        except (ValueError,tk.TclError):
+            return messagebox.showerror('预取数量','每批请填 1–100。')
+        project=self.project
+        credentials={key:value or None for key,value in self.api_credentials.items()}
+        self.batch_stop.clear(); self.batch_running=True
+        def progress(index,total,title,state):
+            self.events.put(('progress',None,f'预取 {index}/{total}：{state} · {title[:75]}'))
+        def done(result):
+            self.batch_running=False
+            label='已停止' if result['stopped'] else '已完成'
+            self.status.set(f"预取{label}：取得 {result['downloaded']} 篇，未取得 {result['failed']} 篇。下载成功的论文仍需你在第 2 步核对保留。点“打开预取结果”看明细。")
+        self.run(lambda:project.prefetch_screened(limit=limit,progress=progress,
+                 should_stop=self.batch_stop.is_set,**credentials),done)
+
+    def open_prefetch_report(self):
+        if not self.project:return
+        path=self.project.folder/'批量预取_最近一次.csv'
+        if path.exists():self.open_file(path)
+        else:messagebox.showinfo('还没有结果','先点“预取下一批”。')
+
+    def open_prefetched_pdf(self):
+        if not self.project:return
+        ids=self.paper_table.selection()
+        if len(ids)!=1:return messagebox.showinfo('选择一篇论文','请只选择一篇论文。')
+        item=self.project.state.get('prefetch',{}).get(ids[0],{})
+        path=self.project.folder/item['path'] if item.get('path') else None
+        if path and path.exists():self.open_file(path)
+        else:messagebox.showinfo('没有预取文件','这篇论文尚未预取到 PDF。')
+
     def build_materials(self):
         page=self.pages[2]
-        ttk.Label(page,text='先选已保留论文，点“自动获取正文”。成功后自动归档；失败会显示原因，再用手动添加文件补充。',wraplength=1150).pack(anchor='w',pady=9)
+        ttk.Label(page,text='已保留论文可逐篇获取，也可批量获取尚无正文的论文。成功后自动归档；失败可在结果表中查看，再用浏览器或插件补充。',wraplength=1150).pack(anchor='w',pady=9)
         bar=ttk.Frame(page); bar.pack(fill='x')
         ttk.Button(bar,text='自动获取所选论文正文',command=self.acquire_material,
                    style='Accent.TButton').pack(side='left',padx=(0,8))
+        ttk.Button(bar,text='批量获取待下载正文',command=self.acquire_batch,
+                   style='Accent.TButton').pack(side='left',padx=(0,8))
+        ttk.Button(bar,text='停止批量',command=self.stop_batch).pack(side='left',padx=(0,8))
         ttk.Button(bar,text='打开论文网页',command=self.open_material_page).pack(side='left',padx=5)
         ttk.Button(bar,text='提取所选论文',command=self.extract).pack(side='left',padx=5)
         ttk.Button(bar,text='下一步：看原文审核',command=lambda:self.tabs.select(3)).pack(side='right')
@@ -301,7 +355,9 @@ class Workbench:
         ttk.Combobox(options,textvariable=self.role,values=['正文','补充材料','原始数据表'],
                      state='readonly',width=14).pack(side='left')
         ttk.Button(options,text='手动添加文件',command=self.add_materials).pack(side='left',padx=5)
+        ttk.Button(options,text='使用浏览器采集全文',command=self.attach_browser_capture).pack(side='left',padx=5)
         ttk.Button(options,text='打开已添加正文',command=self.open_primary).pack(side='left',padx=5)
+        ttk.Button(options,text='打开批量结果',command=self.open_batch_report).pack(side='left',padx=5)
         ttk.Label(page,text='按期刊/出版社信息选择接口：Elsevier API、Springer Nature API 或开放来源。密钥在上方“接口设置”输入。',
                   wraplength=1150).pack(anchor='w',pady=(7,0))
         frame,self.material_table=tree(page,{'title':'已保留论文','files':'材料数','status':'提取状态'},{'title':780,'files':80,'status':230})
@@ -320,6 +376,8 @@ class Workbench:
                    'open_sources':'开放来源'}[publisher_route(self.project.paper(ids[0]))]
             details=[''.join({'primary':'正文','supplement':'补充材料','data':'数据表'}[x['role']]+'：'+Path(x['path']).name) for x in items]
             details.insert(0,'识别来源：'+route+'；期刊：'+str(self.project.paper(ids[0]).get('journal') or '待核对'))
+            if self.project.state.get('captures',{}).get(ids[0]):
+                details.append('已有浏览器采集正文；可点“使用浏览器采集全文”添加为正文。')
             result=self.project.state.get('acquisition',{}).get(ids[0])
             if result:
                 details.append('自动获取：'+('已取得 PDF' if result.get('status') in {'downloaded_pdf','cached_pdf'} else '暂未取得 PDF'))
@@ -352,6 +410,46 @@ class Workbench:
                      elsevier_key=credentials['elsevier_key'] or None,
                      elsevier_insttoken=credentials['elsevier_insttoken'] or None,
                      springer_key=credentials['springer_key'] or None),done)
+
+    def acquire_batch(self):
+        if not self.guarded() or not self.project:return
+        project=self.project
+        identities=[r['record_id'] for r in project.state['papers']
+                    if r.get('human_decision')=='target' and not any(
+                        item['role']=='primary' for item in project.state['attachments'].get(r['record_id'],[]))]
+        if not identities:
+            return messagebox.showinfo('没有待下载论文','已保留论文中没有缺少正文的条目。')
+        if not messagebox.askyesno('批量获取正文',f'将依次尝试 {len(identities)} 篇已保留论文。失败不会停止整批，结果保存在项目文件夹。现在开始吗？'):
+            return
+        credentials={key:value or None for key,value in self.api_credentials.items()}
+        self.batch_stop.clear()
+        self.batch_running=True
+        def progress(index,total,title,state):
+            self.events.put(('progress',None,f'正文获取 {index}/{total}：{state} · {title[:75]}'))
+        def done(result):
+            self.batch_running=False
+            label='已停止' if result['stopped'] else '已完成'
+            self.status.set(f"批量{label}：新获取 {result['downloaded']} 篇，已有正文 {result['existing']} 篇，未获取 {result['failed']} 篇。点“打开批量结果”查看每篇原因。")
+        self.run(lambda:project.acquire_many(identities,progress=progress,
+                 should_stop=self.batch_stop.is_set,**credentials),done)
+
+    def stop_batch(self):
+        if self.batch_running:
+            self.batch_stop.set()
+            self.status.set('已请求停止；当前这篇处理结束后停止，已保存的正文不会丢失。')
+
+    def open_batch_report(self):
+        if not self.project:return
+        path=self.project.folder/'批量正文获取_最近一次.csv'
+        if path.exists():self.open_file(path)
+        else:messagebox.showinfo('还没有结果','先点“批量获取待下载正文”。')
+
+    def attach_browser_capture(self):
+        if not self.guarded() or not self.project:return
+        ids=self.material_table.selection()
+        if len(ids)!=1:return messagebox.showinfo('选择一篇论文','请只选择一篇已保留论文。')
+        self.act(lambda:self.project.attach_browser_capture(ids[0]),
+                 '浏览器采集的材料已添加。请打开核对论文身份、文件内容和归属，再点“提取所选论文”。')
 
     def open_material_page(self):
         if not self.project:return
@@ -582,18 +680,19 @@ class Workbench:
                 status=f"候选 {report['candidates']} 条；未提取块 {report['unresolved_blocks']} 个"
             self.material_table.insert('','end',iid=identity,values=(row['title'],count,status))
         confirmed=sum(r.get('human_decision') in {'target','non_target'} for r in rows)
-        self.summary.set(f'摘要清单 {len(rows)} 篇，人工已确认 {confirmed} 篇，其中保留 {len(kept)} 篇。\n目前待审核数值 {sum(r["review_status"]=="pending" for r in self.records)} 条；已通过 {sum(r["review_status"]=="approved" for r in self.records)} 条。')
+        prefetched=sum(bool(item.get('path')) for item in self.project.state.get('prefetch',{}).values())
+        self.summary.set(f'摘要清单 {len(rows)} 篇，人工已确认 {confirmed} 篇，其中保留 {len(kept)} 篇；已预取 {prefetched} 篇待核对。\n目前待审核数值 {sum(r["review_status"]=="pending" for r in self.records)} 条；已通过 {sum(r["review_status"]=="approved" for r in self.records)} 条。')
         self.project_label.set('当前项目：'+str(self.project.folder))
         exported=self.project.state.get('last_export')
         self.export_summary.set('本次导出位置：'+str(self.project.folder/exported) if exported else '新增提取或审核后，请重新导出，以保存当前结果。')
 
     def help(self):
         messagebox.showinfo('简易操作',
-            '1. 在第 1 步在线检索，或导入自己的摘要；需要出版社接口时，先点上方“接口设置”。\n2. 填写核对人，选择论文，看右侧摘要，点“保留：原始实验研究”。\n3. 在第 3 步选择已保留论文，点“自动获取所选论文正文”；成功后核对身份并提取。失败时打开论文网页，下载后点“手动添加文件”。\n4. 在第 4 步选数据，右侧看原文证据和 PDF 页，通过或修正。\n5. 在第 5 步导出。\n\n第一次只试一篇。合成演示条目不能用于科研；项目决定会自动保存。')
+            '1. 在第 1 步在线检索，或导入自己的摘要；需要出版社接口时，先点上方“接口设置”。\n2. 填写核对人，选择论文，看右侧摘要，点“保留：原始实验研究”。\n3. 在第 3 步可点“批量获取待下载正文”，或逐篇获取；需要时用已加载的 Chrome 插件保存采集包 JSON，导入第 1 步，再点“使用浏览器采集全文”。\n4. 在第 4 步选数据，右侧看原文证据和 PDF 页，通过或修正。\n5. 在第 5 步导出。\n\n先用少量已保留论文试跑。合成演示条目不能用于科研；项目决定会自动保存。')
 
     def browser_help(self):
         messagebox.showinfo('浏览器采集按钮',
-            '先把交付包解压。\n\nChrome 地址栏输入 chrome://extensions，开启开发者模式，点“加载已解压的扩展程序”，选择 browser_extension 文件夹。\n\n打开论文网页，从右上角拼图图标打开“NH3-SCR 摘要采集按钮”，读取并保存 JSON，再回本工具第 1 步导入。\n\n扩展需要这样安装。采集页面不是通过双击 popup.html 使用的。\n也可保存含摘要的 HTML，或导入 Zotero 的 CSL JSON / RIS。')
+            'Chrome 打开 chrome://extensions，对已加载的 NH3-SCR 插件点“重新加载”。第一次使用则开启开发者模式，点“加载已解压的扩展程序”，选择交付包中的 browser_extension 文件夹。\n\n在论文网页展开正文后点插件“读取本页”，再点“下载文件并保存采集包”。等 Chrome 完成下载并保存 JSON，在本工具第 1 步导入。人工保留论文后，第 3 步点“自动获取所选论文正文”会优先使用插件下载的 PDF；点“使用浏览器采集全文”可使用可见网页正文。请核对文件。\n\n采集页面不是双击 popup.html；Zotero 的 CSL JSON / RIS 也可导入摘要。')
 
     def close(self):
         if self.busy:
