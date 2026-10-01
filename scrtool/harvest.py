@@ -400,11 +400,12 @@ def merge_records(records: Iterable[dict]):
 
 
 class Harvester:
-    def __init__(self, email=None, openalex_key=None, elsevier_key=None, springer_key=None, timeout=60):
+    def __init__(self, email=None, openalex_key=None, elsevier_key=None, springer_key=None,
+                 elsevier_insttoken=None, timeout=60):
         self.email = email or os.getenv('UNPAYWALL_EMAIL') or os.getenv('OPENALEX_EMAIL')
         self.openalex_key = openalex_key or os.getenv('OPENALEX_API_KEY')
         self.elsevier_key = elsevier_key or os.getenv('ELSEVIER_API_KEY') or os.getenv('ELSEVIER_TDM_API_KEY')
-        self.elsevier_insttoken = os.getenv('ELSEVIER_INSTTOKEN')
+        self.elsevier_insttoken = elsevier_insttoken or os.getenv('ELSEVIER_INSTTOKEN')
         self.springer_key = springer_key or os.getenv('SPRINGER_API_KEY')
         self.timeout = timeout
         self.session = requests.Session()
@@ -690,7 +691,7 @@ class Harvester:
         parser.feed(response.text[:5_000_000])
         return list(dict.fromkeys(urljoin(response.url, value) for value in parser.urls))
 
-    def download_pdf(self, urls, destination, max_bytes=100 * 1024 * 1024):
+    def download_pdf(self, urls, destination, max_bytes=100 * 1024 * 1024, headers=None):
         destination = Path(destination)
         if is_valid_pdf(destination):
             return {'status': 'cached_pdf', 'path': str(destination.resolve()), 'url': None,
@@ -699,8 +700,8 @@ class Harvester:
         for url in list(dict.fromkeys(u for u in urls if isinstance(u, str) and u.startswith(('http://', 'https://')))):
             try:
                 with self.session.get(url, timeout=self.timeout, stream=True, allow_redirects=True,
-                                      headers={'Accept': 'application/pdf,application/octet-stream;q=0.9,*/*;q=0.1',
-                                               'User-Agent': self.session.headers['User-Agent']}) as response:
+                                      headers=headers or {'Accept': 'application/pdf,application/octet-stream;q=0.9,*/*;q=0.1',
+                                                          'User-Agent': self.session.headers['User-Agent']}) as response:
                     response.raise_for_status()
                     total = 0
                     first = True
@@ -728,6 +729,15 @@ class Harvester:
                     part.unlink()
                 errors.append(f'{url}: {safe_error(exc)}')
         return {'status': 'no_pdf', 'path': None, 'url': None, 'errors': errors}
+
+    def download_elsevier_pdf(self, doi, destination, max_bytes=100 * 1024 * 1024):
+        """Use the Article Retrieval PDF representation when credentials permit it."""
+        if not self.elsevier_key or not doi:
+            return None
+        url = (f'https://api.elsevier.com/content/article/doi/{quote(doi, safe="")}'
+               '?httpAccept=application%2Fpdf&view=FULL&amsRedirect=true')
+        return self.download_pdf([url], destination, max_bytes,
+                                 headers=self.elsevier_headers('application/pdf'))
 
     def download_elsevier_xml(self, doi, destination):
         if not self.elsevier_key or not doi:
@@ -843,7 +853,9 @@ def run_harvest(args):
     if unknown:
         raise ValueError('Unknown sources: ' + ', '.join(sorted(unknown)))
     harvester = Harvester(email=args.email, openalex_key=args.openalex_key,
-                          elsevier_key=args.elsevier_key, springer_key=args.springer_key,
+                          elsevier_key=args.elsevier_key,
+                          elsevier_insttoken=getattr(args, 'elsevier_insttoken', None),
+                          springer_key=args.springer_key,
                           timeout=args.timeout)
     records, errors = [], []
     metadata_path = getattr(args, 'records', None)

@@ -43,20 +43,36 @@ def tree(parent, columns, widths):
 class Workbench:
     def __init__(self,root):
         self.root=root; self.project=None; self.busy=False; self.events=queue.Queue()
+        self.api_credentials={'email':'','openalex_key':'','elsevier_key':'',
+                              'elsevier_insttoken':'','springer_key':''}
         self.current_source=None; self.current_record=None; self.current_claim=None; self.records=[]; self.missing=[]; self.claims=[]
-        root.title('NH₃-SCR 文献数据工作台 0.5')
+        root.title('NH₃-SCR 文献数据工作台 0.7')
         root.geometry('1280x850'); root.minsize(1020,720)
         style=ttk.Style(root)
-        style.configure('TButton',padding=(9,5))
-        style.configure('Treeview',rowheight=27)
-        ttk.Label(root,text='按顺序推进：摘要 → 论文核对 → 正文提取 → 对照原文审核 → 导出',font=('Microsoft YaHei UI',14)).pack(anchor='w',padx=15,pady=(12,6))
-        bar=ttk.Frame(root); bar.pack(fill='x',padx=15)
-        for label,fn in [('新建项目',self.new_project),('继续以前项目',self.open_project),('打开项目文件夹',lambda:self.open_file(self.project.folder if self.project else None)),('简易操作说明',self.help)]:
+        style.theme_use('clam')
+        style.configure('.',font=('Microsoft YaHei UI',10),background='#F5F7FB',foreground='#19324A')
+        style.configure('TFrame',background='#F5F7FB')
+        style.configure('TLabel',background='#F5F7FB',foreground='#19324A')
+        style.configure('TButton',padding=(11,7),background='#E6EDF5',borderwidth=0)
+        style.map('TButton',background=[('active','#D4E4F4')])
+        style.configure('Accent.TButton',padding=(13,8),background='#1665A3',foreground='white',
+                        font=('Microsoft YaHei UI',10,'bold'))
+        style.map('Accent.TButton',background=[('active','#0E4D80')],foreground=[('active','white')])
+        style.configure('Treeview',rowheight=30,background='white',fieldbackground='white',foreground='#19324A')
+        style.map('Treeview',background=[('selected','#D8EAFB')],foreground=[('selected','#19324A')])
+        style.configure('TNotebook.Tab',padding=(18,10),font=('Microsoft YaHei UI',10,'bold'))
+        header=tk.Frame(root,bg='#173B5E'); header.pack(fill='x')
+        tk.Label(header,text='NH₃-SCR 文献数据工作台',font=('Microsoft YaHei UI',18,'bold'),
+                 bg='#173B5E',fg='white').pack(anchor='w',padx=18,pady=(12,0))
+        tk.Label(header,text='统一检索  →  核对论文  →  按出版社获取正文  →  对照原文审核  →  导出',
+                 font=('Microsoft YaHei UI',10),bg='#173B5E',fg='#D9E9F7').pack(anchor='w',padx=18,pady=(2,12))
+        bar=ttk.Frame(root); bar.pack(fill='x',padx=15,pady=(10,0))
+        for label,fn in [('新建项目',self.new_project),('继续以前项目',self.open_project),('接口设置',self.api_settings),('打开项目文件夹',lambda:self.open_file(self.project.folder if self.project else None)),('简易操作说明',self.help)]:
             ttk.Button(bar,text=label,command=fn).pack(side='left',padx=(0,6))
         ttk.Label(bar,text='核对人：').pack(side='left',padx=(15,0))
         self.reviewer=tk.StringVar()
         ttk.Entry(bar,textvariable=self.reviewer,width=15).pack(side='left')
-        self.project_label=tk.StringVar(value='还没有选择项目。可以先点“使用现有 80 篇摘要”开始测试。')
+        self.project_label=tk.StringVar(value='还没有选择项目。可以在线检索，或导入已有摘要开始。')
         ttk.Label(root,textvariable=self.project_label,wraplength=1180).pack(fill='x',padx=15,pady=6)
         self.status=tk.StringVar(value='先收集摘要；人工确认后才进入正文提取。所有操作自动保存在项目中。')
         ttk.Label(root,textvariable=self.status,wraplength=1180).pack(fill='x',padx=15,pady=(0,7))
@@ -125,9 +141,49 @@ class Workbench:
         if not path: return
         self.safe(lambda:os.startfile(str(path)))
 
+    def api_settings(self):
+        if not self.guarded():return
+        dialog=tk.Toplevel(self.root); dialog.title('文献接口设置'); dialog.geometry('560x390')
+        dialog.transient(self.root)
+        body=ttk.Frame(dialog,padding=18); body.pack(fill='both',expand=True)
+        ttk.Label(body,text='统一检索与正文获取使用同一组接口设置',
+                  font=('Microsoft YaHei UI',13,'bold')).grid(row=0,column=0,columnspan=2,sticky='w',pady=(0,14))
+        fields=[('elsevier_key','Elsevier API key',True),
+                ('elsevier_insttoken','Elsevier InstToken（如学校提供）',True),
+                ('springer_key','Springer Nature key',True),
+                ('openalex_key','OpenAlex key',True),
+                ('email','联系邮箱（Unpaywall）',False)]
+        values={}
+        for index,(key,label,secret) in enumerate(fields,1):
+            ttk.Label(body,text=label).grid(row=index,column=0,sticky='w',pady=7)
+            values[key]=tk.StringVar(value=self.api_credentials[key])
+            ttk.Entry(body,textvariable=values[key],show='●' if secret else '',width=34).grid(
+                row=index,column=1,sticky='ew',padx=(12,0),pady=7)
+        body.columnconfigure(1,weight=1)
+        ttk.Label(body,text='只保存在本次程序会话中，不写入项目或 GitHub。API key 不等于全文访问权限。',
+                  wraplength=500).grid(row=6,column=0,columnspan=2,sticky='w',pady=(16,8))
+        def save():
+            self.api_credentials={key:value.get().strip() for key,value in values.items()}
+            self.status.set('接口设置已用于本次会话。现在可以在线检索，或对已保留论文获取正文。')
+            dialog.destroy()
+        ttk.Button(body,text='保存接口设置',command=save,style='Accent.TButton').grid(
+            row=7,column=0,columnspan=2,sticky='e',pady=8)
+        dialog.grab_set()
+
     def build_import(self):
         page=self.pages[0]
-        ttk.Label(page,text='导入浏览器保存的摘要 JSON、保存的论文 HTML，或 Zotero 导出的 CSL JSON / RIS。',wraplength=1100).pack(anchor='w',padx=18,pady=18)
+        ttk.Label(page,text='直接在线检索，或导入浏览器、Zotero 和本地文件中的摘要。检索结果先核对，再获取正文。',wraplength=1100).pack(anchor='w',padx=18,pady=(16,8))
+        search=ttk.Frame(page); search.pack(fill='x',padx=18,pady=(0,10))
+        ttk.Label(search,text='检索词').pack(side='left')
+        self.search_query=tk.StringVar(value='NH3-SCR catalyst')
+        ttk.Entry(search,textvariable=self.search_query,width=45).pack(side='left',padx=(8,12),fill='x',expand=True)
+        ttk.Label(search,text='每个来源最多').pack(side='left')
+        self.search_limit=tk.IntVar(value=20)
+        ttk.Spinbox(search,from_=1,to=100,textvariable=self.search_limit,width=5).pack(side='left',padx=(5,12))
+        ttk.Button(search,text='在线检索并加入清单',command=self.online_search,
+                   style='Accent.TButton').pack(side='left')
+        ttk.Label(page,text='默认使用 OpenAlex 和 Crossref；在上方“接口设置”输入密钥后，自动加入对应出版商接口。',
+                  wraplength=1100).pack(anchor='w',padx=18,pady=(0,12))
         self.sample_label = ('使用现有 80 篇摘要开始测试' if bundled_sample().name == 'records_with_abstracts.json'
                              else '使用合成演示摘要开始测试')
         for label,fn in [(self.sample_label,lambda:self.import_paths([bundled_sample()])),('添加自己的摘要文件',self.choose_abstracts),('浏览器采集按钮怎么安装',self.browser_help),('下一步：核对论文',lambda:self.tabs.select(1))]:
@@ -140,6 +196,28 @@ class Workbench:
         if not self.guarded(): return
         paths=filedialog.askopenfilenames(title='选择摘要文件',filetypes=[('摘要文件','*.json *.html *.htm *.ris *.csv'),('所有文件','*.*')])
         if paths:self.import_paths(paths)
+
+    def online_search(self):
+        if not self.guarded():return
+        try:
+            limit=int(self.search_limit.get())
+            if not 1<=limit<=100:raise ValueError()
+        except (ValueError,tk.TclError):
+            return messagebox.showerror('检索数量','每个来源请填 1–100。')
+        project=self.ensure_project()
+        credentials=dict(self.api_credentials)
+        sources=['openalex','crossref']
+        if credentials['elsevier_key']:sources.append('scopus')
+        if credentials['springer_key']:sources.append('springer')
+        def done(result):
+            self.status.set(f"本次找到 {result['found']} 篇；清单共 {result['total']} 篇。"
+                            +(f" 有 {len(result['errors'])} 个来源提示，记录在项目文件夹。" if result['errors'] else ' 请到第 2 步核对。'))
+            self.tabs.select(1)
+        self.run(lambda:project.search_online(self.search_query.get(),sources,limit=limit,
+                     email=credentials['email'] or None,openalex_key=credentials['openalex_key'] or None,
+                     elsevier_key=credentials['elsevier_key'] or None,
+                     elsevier_insttoken=credentials['elsevier_insttoken'] or None,
+                     springer_key=credentials['springer_key'] or None),done)
 
     def import_paths(self,paths):
         if not self.guarded(): return
@@ -212,17 +290,20 @@ class Workbench:
         page=self.pages[2]
         ttk.Label(page,text='先选已保留论文，点“自动获取正文”。成功后自动归档；失败会显示原因，再用手动添加文件补充。',wraplength=1150).pack(anchor='w',pady=9)
         bar=ttk.Frame(page); bar.pack(fill='x')
-        self.role=tk.StringVar(value='正文')
-        ttk.Combobox(bar,textvariable=self.role,values=['正文','补充材料','原始数据表'],state='readonly',width=14).pack(side='left')
-        ttk.Button(bar,text='自动获取所选论文正文',command=self.acquire_material).pack(side='left',padx=5)
-        ttk.Button(bar,text='手动添加文件',command=self.add_materials).pack(side='left',padx=5)
-        ttk.Button(bar,text='打开已添加正文',command=self.open_primary).pack(side='left',padx=5)
+        ttk.Button(bar,text='自动获取所选论文正文',command=self.acquire_material,
+                   style='Accent.TButton').pack(side='left',padx=(0,8))
+        ttk.Button(bar,text='打开论文网页',command=self.open_material_page).pack(side='left',padx=5)
         ttk.Button(bar,text='提取所选论文',command=self.extract).pack(side='left',padx=5)
         ttk.Button(bar,text='下一步：看原文审核',command=lambda:self.tabs.select(3)).pack(side='right')
-        options=ttk.Frame(page); options.pack(fill='x',pady=(6,0))
-        ttk.Label(options,text='联系邮箱（可选，用于 Unpaywall 查询开放版本）：').pack(side='left')
-        self.oa_email=tk.StringVar()
-        ttk.Entry(options,textvariable=self.oa_email,width=32).pack(side='left')
+        options=ttk.Frame(page); options.pack(fill='x',pady=(8,0))
+        ttk.Label(options,text='已有文件 / 补充材料：').pack(side='left')
+        self.role=tk.StringVar(value='正文')
+        ttk.Combobox(options,textvariable=self.role,values=['正文','补充材料','原始数据表'],
+                     state='readonly',width=14).pack(side='left')
+        ttk.Button(options,text='手动添加文件',command=self.add_materials).pack(side='left',padx=5)
+        ttk.Button(options,text='打开已添加正文',command=self.open_primary).pack(side='left',padx=5)
+        ttk.Label(page,text='按期刊/出版社信息选择接口：Elsevier API、Springer Nature API 或开放来源。密钥在上方“接口设置”输入。',
+                  wraplength=1150).pack(anchor='w',pady=(7,0))
         frame,self.material_table=tree(page,{'title':'已保留论文','files':'材料数','status':'提取状态'},{'title':780,'files':80,'status':230})
         frame.pack(fill='both',expand=True,pady=8)
         self.material_detail=tk.StringVar(value='选择论文查看已绑定的文件。')
@@ -234,12 +315,20 @@ class Workbench:
         ids=self.material_table.selection()
         if ids:
             items=self.project.state['attachments'].get(ids[0],[])
+            from scrtool.fulltext import publisher_route
+            route={'elsevier':'Elsevier','springer_nature':'Springer Nature',
+                   'open_sources':'开放来源'}[publisher_route(self.project.paper(ids[0]))]
             details=[''.join({'primary':'正文','supplement':'补充材料','data':'数据表'}[x['role']]+'：'+Path(x['path']).name) for x in items]
+            details.insert(0,'识别来源：'+route+'；期刊：'+str(self.project.paper(ids[0]).get('journal') or '待核对'))
             result=self.project.state.get('acquisition',{}).get(ids[0])
             if result:
-                details.append('自动获取：'+result['status']+('；来源：'+result['source'] if result.get('source') else ''))
-                if result.get('errors'):
-                    details.append('原因：'+'；'.join(result['errors'][:2]))
+                details.append('自动获取：'+('已取得 PDF' if result.get('status') in {'downloaded_pdf','cached_pdf'} else '暂未取得 PDF'))
+                if result.get('source'):details.append('来源：'+result['source'])
+                if result.get('message'):
+                    details.append(result['message'])
+                elif result.get('errors'):
+                    from scrtool.fulltext import guidance
+                    details.append(guidance(self.project.paper(ids[0]),result))
             self.material_detail.set('\n'.join(details) or '尚未添加材料。')
 
     def acquire_material(self):
@@ -255,8 +344,23 @@ class Workbench:
             elif result.get('path'):
                 self.status.set('正文已自动添加；来源：'+str(result.get('source'))+'。请核对论文身份，再点“提取所选论文”。')
             else:
-                self.status.set('未取得正文：'+'；'.join(result.get('errors',[])[:2])+'。可打开 DOI 页面后手动添加文件。')
-        self.run(lambda:project.acquire_primary(identity,email=self.oa_email.get().strip() or None),done)
+                self.status.set(result.get('message') or '暂未取得 PDF。请打开论文网页，下载后添加本地文件。')
+        credentials=dict(self.api_credentials)
+        self.run(lambda:project.acquire_primary(identity,
+                     email=credentials['email'] or None,
+                     openalex_key=credentials['openalex_key'] or None,
+                     elsevier_key=credentials['elsevier_key'] or None,
+                     elsevier_insttoken=credentials['elsevier_insttoken'] or None,
+                     springer_key=credentials['springer_key'] or None),done)
+
+    def open_material_page(self):
+        if not self.project:return
+        ids=self.material_table.selection()
+        if len(ids)!=1:return messagebox.showinfo('选择一篇论文','请先选择一篇论文。')
+        paper=self.project.paper(ids[0])
+        url=('https://doi.org/'+paper['doi']) if paper.get('doi') else paper.get('landing_page_url')
+        if url and url.startswith(('https://','http://')):webbrowser.open(url)
+        else:messagebox.showinfo('缺少链接','这篇题录没有 DOI 或论文网址，请核对题录。')
 
     def open_primary(self):
         if not self.project:return
@@ -472,7 +576,7 @@ class Workbench:
             status='未提取' if count else '待获取正文'
             acquisition=self.project.state.get('acquisition',{}).get(identity)
             if not count and acquisition:
-                status='获取失败：'+acquisition['status']
+                status='需浏览器获取正文'
             if identity in self.project.state['runs']:
                 report=__import__('json').loads((self.project.run_path(identity)/'run_report.json').read_text(encoding='utf-8'))
                 status=f"候选 {report['candidates']} 条；未提取块 {report['unresolved_blocks']} 个"
@@ -485,7 +589,7 @@ class Workbench:
 
     def help(self):
         messagebox.showinfo('简易操作',
-            '第一次先测试一篇：\n\n1. 点“'+self.sample_label+'”，填写核对人。\n2. 选论文，看右侧摘要，点“保留：原始实验研究”。\n3. 选论文，点“自动获取所选论文正文”；成功后核对身份并提取。失败时打开 DOI 页面，下载后点“手动添加文件”。\n4. 选数据，右侧看原文证据和 PDF 页，通过或修正。\n5. 点导出。\n\n合成演示条目不能用于科研；项目决定会自动保存。')
+            '1. 在第 1 步在线检索，或导入自己的摘要；需要出版社接口时，先点上方“接口设置”。\n2. 填写核对人，选择论文，看右侧摘要，点“保留：原始实验研究”。\n3. 在第 3 步选择已保留论文，点“自动获取所选论文正文”；成功后核对身份并提取。失败时打开论文网页，下载后点“手动添加文件”。\n4. 在第 4 步选数据，右侧看原文证据和 PDF 页，通过或修正。\n5. 在第 5 步导出。\n\n第一次只试一篇。合成演示条目不能用于科研；项目决定会自动保存。')
 
     def browser_help(self):
         messagebox.showinfo('浏览器采集按钮',

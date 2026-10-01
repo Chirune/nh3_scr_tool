@@ -312,6 +312,7 @@ def main():
     p.add_argument('--email', help='Email for Unpaywall/OpenAlex polite pool; or set UNPAYWALL_EMAIL')
     p.add_argument('--openalex-key', help='OpenAlex API key; or set OPENALEX_API_KEY')
     p.add_argument('--elsevier-key', help='Elsevier API key; or set ELSEVIER_API_KEY')
+    p.add_argument('--elsevier-insttoken', help='Optional Elsevier institution token; or set ELSEVIER_INSTTOKEN')
     p.add_argument('--springer-key', help='Springer Nature API key; or set SPRINGER_API_KEY')
     p.add_argument('--local-papers', action='append', default=[], help='Inventory a local paper directory; repeat if needed')
     p.add_argument('--records', help='Reuse saved metadata JSON/CSV, without repeating online searches')

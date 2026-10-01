@@ -123,6 +123,40 @@ class Project:
         self.save()
         return len(rows), errors
 
+    def search_online(self, query, sources, *, limit=20, email=None, openalex_key=None,
+                      elsevier_key=None, elsevier_insttoken=None, springer_key=None):
+        """Use the existing multi-source harvester without downloading before review."""
+        query = query.strip()
+        if not query:
+            raise ValueError('请输入检索词。')
+        from .harvest import ALLOWED_SOURCES, run_harvest
+        sources = list(dict.fromkeys(sources))
+        if not sources or set(sources) - ALLOWED_SOURCES:
+            raise ValueError('请选择至少一个可用的检索来源。')
+        output = self.folder / 'searches' / stamp()
+        args = argparse.Namespace(query=[query], sources=sources, limit=limit,
+                                  from_year=None, to_year=None, email=email,
+                                  openalex_key=openalex_key, elsevier_key=elsevier_key,
+                                  elsevier_insttoken=elsevier_insttoken,
+                                  springer_key=springer_key, local_papers=[], records=None,
+                                  public_abstracts=True, abstract_page_limit=5,
+                                  screen_engine='none', download=False, max_downloads=0,
+                                  max_file_mb=100, timeout=20, delay=0, output=str(output))
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_harvest(args)
+        found = read_json(output / 'records.json')
+        errors = read_json(output / 'errors.json')
+        if found:
+            total, import_errors = self.import_abstracts([output / 'records.json'])
+            errors.extend(import_errors)
+        else:
+            total = len(self.state['papers'])
+        self.state['history'].append({'action': 'online_search', 'query': query,
+                                      'sources': sources, 'found': len(found),
+                                      'time': datetime.now().isoformat()})
+        self.save()
+        return {'found': len(found), 'total': total, 'errors': errors, 'output': str(output)}
+
     def score_papers(self, config):
         from .scoring import score_record, validate_config
         config = validate_config(config)
@@ -269,7 +303,8 @@ class Project:
         self.state['last_export'] = None
         self.save()
 
-    def acquire_primary(self, identity, *, email=None):
+    def acquire_primary(self, identity, *, email=None, openalex_key=None, elsevier_key=None,
+                        elsevier_insttoken=None, springer_key=None):
         """Find a PDF by DOI and attach it only to the selected, approved paper."""
         paper = self.paper(identity)
         if paper.get('human_decision') != 'target':
@@ -277,15 +312,19 @@ class Project:
         if any(item['role'] == 'primary' for item in self.state['attachments'].get(identity, [])):
             return {'status': 'already_attached', 'source': None, 'url': None,
                     'errors': [], 'path': None}
-        from .fulltext import acquire_pdf
+        from .fulltext import acquire_pdf, publisher_route
         destination = self.folder / 'downloads' / identity / 'primary.pdf'
-        result = acquire_pdf(paper, destination, email=email)
+        result = acquire_pdf(paper, destination, email=email, openalex_key=openalex_key,
+                             elsevier_key=elsevier_key, elsevier_insttoken=elsevier_insttoken,
+                             springer_key=springer_key)
         if result.get('path'):
             self.attach(identity, [destination], 'primary')
         self.state.setdefault('acquisition', {})[identity] = {
             'status': result['status'], 'source': result.get('source'),
             'url': result.get('url'), 'errors': result.get('errors', []),
+            'message': result.get('message', ''),
             'doi': paper.get('doi'), 'journal': paper.get('journal'),
+            'publisher_route': publisher_route(paper),
             'time': datetime.now().isoformat(),
         }
         self.state['history'].append({'action': 'acquire_primary', 'paper': identity,

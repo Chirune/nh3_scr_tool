@@ -160,6 +160,17 @@ class HarvestTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]['extension'], '.pdf')
 
+    def test_elsevier_pdf_uses_api_key_header_and_pdf_representation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            harvester = Harvester(elsevier_key='test-key', elsevier_insttoken='test-token')
+            harvester.session.get = Mock(return_value=FakeResponse([b'%PDF-1.7\nbody']))
+            result = harvester.download_elsevier_pdf('10.1016/j.test', Path(tmp) / 'paper.pdf')
+            self.assertEqual(result['status'], 'downloaded_pdf')
+            call = harvester.session.get.call_args
+            self.assertIn('httpAccept=application%2Fpdf', call.args[0])
+            self.assertEqual(call.kwargs['headers']['X-ELS-APIKey'], 'test-key')
+            self.assertEqual(call.kwargs['headers']['X-ELS-Insttoken'], 'test-token')
+
     def test_parse_current_nature_search_card(self):
         html = '''<article><h3 class="c-card__title"><a href="/articles/s41467-026-1"
         data-track-action="view article">NH3-SCR catalyst</a></h3>
