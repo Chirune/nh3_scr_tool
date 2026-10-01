@@ -33,11 +33,27 @@ def verify(output,sample,real_pdf=None,app_factory=None):
     writer=PdfWriter(); writer.add_blank_page(width=400,height=500)
     with blank.open('wb') as handle:writer.write(handle)
     assert len(PdfReader(blank).pages)==1
+    # Exercise the frozen EXE's DOI-acquisition-to-project path without a network call.
+    from . import fulltext
+    original_acquire = fulltext.acquire_pdf
+    def fixture_acquire(record, destination, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(blank.read_bytes())
+        return {'status':'downloaded_pdf','path':str(destination),'source':'software_fixture',
+                'url':'https://example.invalid/software-fixture.pdf','errors':[]}
+    try:
+        fulltext.acquire_pdf = fixture_acquire
+        acquired = project.acquire_primary(rid)
+    finally:
+        fulltext.acquire_pdf = original_acquire
+    assert acquired['status']=='downloaded_pdf'
+    assert any(item['role']=='primary' for item in Project(project.folder).state['attachments'][rid])
     # Imported by the app entry point, including inside the frozen EXE.
     from workbench_preview import render_page
     preview=render_page(real_pdf or blank,'page:1',output/'page_preview')
     assert preview and preview.stat().st_size>100
     result={'abstract_import':count,'explicit_paper_confirmation':True,'source_link':True,
+            'auto_fulltext_attach':True,
             'pending_export_blocked':True,'kelvin_conversion':True,'review_resume_export':True,
             'pdf_read_and_render':True,'preview_path':str(preview),'software_fixture_only':True}
     from PIL import Image

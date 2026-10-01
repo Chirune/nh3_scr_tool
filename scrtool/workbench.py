@@ -269,6 +269,30 @@ class Project:
         self.state['last_export'] = None
         self.save()
 
+    def acquire_primary(self, identity, *, email=None):
+        """Find a PDF by DOI and attach it only to the selected, approved paper."""
+        paper = self.paper(identity)
+        if paper.get('human_decision') != 'target':
+            raise ValueError('先在第 2 步人工确认保留这篇论文。')
+        if any(item['role'] == 'primary' for item in self.state['attachments'].get(identity, [])):
+            return {'status': 'already_attached', 'source': None, 'url': None,
+                    'errors': [], 'path': None}
+        from .fulltext import acquire_pdf
+        destination = self.folder / 'downloads' / identity / 'primary.pdf'
+        result = acquire_pdf(paper, destination, email=email)
+        if result.get('path'):
+            self.attach(identity, [destination], 'primary')
+        self.state.setdefault('acquisition', {})[identity] = {
+            'status': result['status'], 'source': result.get('source'),
+            'url': result.get('url'), 'errors': result.get('errors', []),
+            'doi': paper.get('doi'), 'journal': paper.get('journal'),
+            'time': datetime.now().isoformat(),
+        }
+        self.state['history'].append({'action': 'acquire_primary', 'paper': identity,
+                                      'status': result['status'], 'time': datetime.now().isoformat()})
+        self.save()
+        return result
+
     def extract(self, identities):
         identities = list(identities)
         # Check the whole selection before starting a batch.

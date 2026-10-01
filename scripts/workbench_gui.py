@@ -44,7 +44,7 @@ class Workbench:
     def __init__(self,root):
         self.root=root; self.project=None; self.busy=False; self.events=queue.Queue()
         self.current_source=None; self.current_record=None; self.current_claim=None; self.records=[]; self.missing=[]; self.claims=[]
-        root.title('NH₃-SCR 文献数据工作台 0.4')
+        root.title('NH₃-SCR 文献数据工作台 0.5')
         root.geometry('1280x850'); root.minsize(1020,720)
         style=ttk.Style(root)
         style.configure('TButton',padding=(9,5))
@@ -210,13 +210,19 @@ class Workbench:
 
     def build_materials(self):
         page=self.pages[2]
-        ttk.Label(page,text='先选择一篇已保留论文，再给它添加对应正文、补充材料或原始数据。文件会复制到项目中，保持论文归属。',wraplength=1150).pack(anchor='w',pady=9)
+        ttk.Label(page,text='先选已保留论文，点“自动获取正文”。成功后自动归档；失败会显示原因，再用手动添加文件补充。',wraplength=1150).pack(anchor='w',pady=9)
         bar=ttk.Frame(page); bar.pack(fill='x')
         self.role=tk.StringVar(value='正文')
         ttk.Combobox(bar,textvariable=self.role,values=['正文','补充材料','原始数据表'],state='readonly',width=14).pack(side='left')
-        ttk.Button(bar,text='给所选论文添加文件',command=self.add_materials).pack(side='left',padx=5)
+        ttk.Button(bar,text='自动获取所选论文正文',command=self.acquire_material).pack(side='left',padx=5)
+        ttk.Button(bar,text='手动添加文件',command=self.add_materials).pack(side='left',padx=5)
+        ttk.Button(bar,text='打开已添加正文',command=self.open_primary).pack(side='left',padx=5)
         ttk.Button(bar,text='提取所选论文',command=self.extract).pack(side='left',padx=5)
         ttk.Button(bar,text='下一步：看原文审核',command=lambda:self.tabs.select(3)).pack(side='right')
+        options=ttk.Frame(page); options.pack(fill='x',pady=(6,0))
+        ttk.Label(options,text='联系邮箱（可选，用于 Unpaywall 查询开放版本）：').pack(side='left')
+        self.oa_email=tk.StringVar()
+        ttk.Entry(options,textvariable=self.oa_email,width=32).pack(side='left')
         frame,self.material_table=tree(page,{'title':'已保留论文','files':'材料数','status':'提取状态'},{'title':780,'files':80,'status':230})
         frame.pack(fill='both',expand=True,pady=8)
         self.material_detail=tk.StringVar(value='选择论文查看已绑定的文件。')
@@ -228,7 +234,37 @@ class Workbench:
         ids=self.material_table.selection()
         if ids:
             items=self.project.state['attachments'].get(ids[0],[])
-            self.material_detail.set('\n'.join({'primary':'正文','supplement':'补充材料','data':'数据表'}[x['role']]+'：'+Path(x['path']).name for x in items) or '尚未添加材料。')
+            details=[''.join({'primary':'正文','supplement':'补充材料','data':'数据表'}[x['role']]+'：'+Path(x['path']).name) for x in items]
+            result=self.project.state.get('acquisition',{}).get(ids[0])
+            if result:
+                details.append('自动获取：'+result['status']+('；来源：'+result['source'] if result.get('source') else ''))
+                if result.get('errors'):
+                    details.append('原因：'+'；'.join(result['errors'][:2]))
+            self.material_detail.set('\n'.join(details) or '尚未添加材料。')
+
+    def acquire_material(self):
+        if not self.guarded() or not self.project:return
+        ids=self.material_table.selection()
+        if len(ids)!=1:return messagebox.showinfo('选择一篇论文','请只选择一篇已保留论文。')
+        identity=ids[0]; project=self.project
+        def done(result):
+            self.material_table.selection_set(identity)
+            self.material_selected()
+            if result['status']=='already_attached':
+                self.status.set('这篇论文已有正文文件，可以直接点“提取所选论文”。')
+            elif result.get('path'):
+                self.status.set('正文已自动添加；来源：'+str(result.get('source'))+'。请核对论文身份，再点“提取所选论文”。')
+            else:
+                self.status.set('未取得正文：'+'；'.join(result.get('errors',[])[:2])+'。可打开 DOI 页面后手动添加文件。')
+        self.run(lambda:project.acquire_primary(identity,email=self.oa_email.get().strip() or None),done)
+
+    def open_primary(self):
+        if not self.project:return
+        ids=self.material_table.selection()
+        if len(ids)!=1:return messagebox.showinfo('选择一篇论文','请先选择一篇论文。')
+        item=next((x for x in self.project.state['attachments'].get(ids[0],[]) if x['role']=='primary'),None)
+        if item:self.open_file(self.project.folder/item['path'])
+        else:messagebox.showinfo('尚无正文','请先尝试自动获取，或手动添加这篇论文的正文文件。')
 
     def add_materials(self):
         if not self.guarded() or not self.project:return
@@ -433,7 +469,10 @@ class Workbench:
         rows=self.project.state['papers']; kept=[r for r in rows if r.get('human_decision')=='target']
         for row in kept:
             identity=row['record_id']; count=len(self.project.state['attachments'].get(identity,[]))
-            status='未提取' if count else '待添加材料'
+            status='未提取' if count else '待获取正文'
+            acquisition=self.project.state.get('acquisition',{}).get(identity)
+            if not count and acquisition:
+                status='获取失败：'+acquisition['status']
             if identity in self.project.state['runs']:
                 report=__import__('json').loads((self.project.run_path(identity)/'run_report.json').read_text(encoding='utf-8'))
                 status=f"候选 {report['candidates']} 条；未提取块 {report['unresolved_blocks']} 个"
@@ -446,7 +485,7 @@ class Workbench:
 
     def help(self):
         messagebox.showinfo('简易操作',
-            '第一次先测试一篇：\n\n1. 点“'+self.sample_label+'”，填写核对人。\n2. 选论文，看右侧摘要，点“保留：原始实验研究”。\n3. 给这篇论文添加对应正文和补充材料，再点提取。\n4. 选数据，右侧看核对问题、原文文字和 PDF 页，通过或修正。未提取页可查看、补录、记备注。\n5. 点导出并打开结果。\n\n合成演示条目不能用于科研；下次点“继续以前项目”，选择该项目中的 project.json。所有决定会保留。')
+            '第一次先测试一篇：\n\n1. 点“'+self.sample_label+'”，填写核对人。\n2. 选论文，看右侧摘要，点“保留：原始实验研究”。\n3. 选论文，点“自动获取所选论文正文”；成功后核对身份并提取。失败时打开 DOI 页面，下载后点“手动添加文件”。\n4. 选数据，右侧看原文证据和 PDF 页，通过或修正。\n5. 点导出。\n\n合成演示条目不能用于科研；项目决定会自动保存。')
 
     def browser_help(self):
         messagebox.showinfo('浏览器采集按钮',
