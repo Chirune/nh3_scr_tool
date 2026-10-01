@@ -122,7 +122,9 @@ def blocks(path, paper_id=None):
                     block_id=uid(source_id, locator, text), **extra)
 
     suffix = path.suffix.lower()
-    if suffix == '.pdf':
+    if suffix in {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp'}:
+        yield block('', 'image:1', 'image', image_path=str(path), needs_ocr=True)
+    elif suffix == '.pdf':
         from pypdf import PdfReader
         for i, page in enumerate(PdfReader(path).pages, 1):
             text = page.extract_text() or ''

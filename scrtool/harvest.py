@@ -87,7 +87,7 @@ def parse_nature_search(content, query):
         authors = [node.get_text(' ', strip=True) for node in
                    article.select('li[itemprop="creator"] span[itemprop="name"]')]
         is_oa = article.find(attrs={'data-test': 'open-access'}) is not None
-        records.append(_base_record(
+        record = _base_record(
             doi=doi, title=title_node.get_text(' ', strip=True),
             abstract=abstract_node.get_text(' ', strip=True) if abstract_node else None,
             year=int(year_match.group(1)) if year_match else None,
@@ -97,7 +97,11 @@ def parse_nature_search(content, query):
             is_oa=is_oa, oa_status='open' if is_oa else None,
             landing_page_url=urljoin('https://www.nature.com', href),
             source_names=['nature'], source_ids={'nature': href}, query_matches=[query],
-        ))
+        )
+        # Search-card descriptions can be editorial summaries, not full abstracts.
+        record['abstract_source'] = 'nature_search_summary'
+        record['abstract_is_full'] = False
+        records.append(record)
     return records
 
 
@@ -257,6 +261,7 @@ def parse_scopus(item, query):
     year = int(date[:4]) if re.match(r'^\d{4}', date) else None
     return _base_record(
         doi=item.get('prism:doi'), title=item.get('dc:title'),
+        abstract=elsevier_abstract(item),
         year=year, journal=item.get('prism:publicationName'),
         authors=[item['dc:creator']] if item.get('dc:creator') else [],
         document_type=item.get('subtypeDescription'),
@@ -264,6 +269,34 @@ def parse_scopus(item, query):
         landing_page_url=item.get('prism:url'), source_names=['scopus'],
         source_ids={'scopus': item.get('dc:identifier')}, query_matches=[query],
     )
+
+
+def elsevier_abstract(data):
+    """Read abstract text without treating metadata or a title as an abstract."""
+    if not isinstance(data, dict):
+        return None
+    for key in ('dc:description', 'description'):
+        value = data.get(key)
+        if isinstance(value, dict):
+            value = value.get('$')
+        if isinstance(value, str) and value.strip():
+            return re.sub(r'\s+', ' ', BeautifulSoup(value, 'html.parser').get_text()).strip()
+    for key in ('abstracts-retrieval-response', 'full-text-retrieval-response', 'coredata'):
+        value = elsevier_abstract(data.get(key))
+        if value:
+            return value
+    return None
+
+
+def validate_elsevier_fulltext(content):
+    """META XML and service-error XML are not downloadable full-text articles."""
+    root = ET.fromstring(content)
+    local_name = lambda node: node.tag.rsplit('}', 1)[-1]
+    if any(local_name(node) in {'service-error', 'error-response', 'error'} for node in root.iter()):
+        raise ValueError('Elsevier returned an API error instead of full text')
+    if not any(local_name(node) in {'body', 'rawtext'} and ''.join(node.itertext()).strip()
+               for node in root.iter()):
+        raise ValueError('Elsevier returned metadata/abstract only; full text is absent')
 
 
 def parse_springer(item, query):
@@ -440,14 +473,78 @@ class Harvester:
             data = self._get_json(
                 'https://api.elsevier.com/content/search/scopus',
                 params={'query': expression, 'start': start, 'count': min(25, limit - start)},
-                headers={'X-ELS-APIKey': self.elsevier_key, 'Accept': 'application/json',
-                         'User-Agent': self.session.headers['User-Agent']},
+                headers=self.elsevier_headers('application/json'),
             )
             page = (data.get('search-results') or {}).get('entry') or []
             results.extend(parse_scopus(item, query) for item in page if 'error' not in item)
             if len(page) < 25:
                 break
         return results[:limit]
+
+    def elsevier_headers(self, accept):
+        headers = {'X-ELS-APIKey': self.elsevier_key, 'Accept': accept,
+                   'User-Agent': self.session.headers['User-Agent']}
+        if self.elsevier_insttoken:
+            headers['X-ELS-Insttoken'] = self.elsevier_insttoken
+        return headers
+
+    def enrich_elsevier_abstracts(self, records):
+        """Search results usually omit abstracts; retrieve META_ABS before screening."""
+        if not self.elsevier_key:
+            return
+        unavailable = {}
+        for index, record in enumerate(records, 1):
+            if record.get('abstract'):
+                continue
+            doi = record.get('doi') or ''
+            scopus_id = (record.get('source_ids') or {}).get('scopus')
+            endpoints = []
+            if scopus_id:
+                identifier = str(scopus_id).removeprefix('SCOPUS_ID:')
+                if identifier.isdigit():
+                    endpoints.append(('scopus_abstract',
+                                      'https://api.elsevier.com/content/abstract/scopus_id/' + identifier))
+            if doi.startswith(('10.1016/', '10.1006/')) or 'elsevier' in str(record.get('publisher') or '').lower():
+                if doi:
+                    endpoints.append(('elsevier_article_abstract',
+                                      'https://api.elsevier.com/content/article/doi/' + quote(doi, safe='')))
+            if not endpoints:
+                continue
+            failures = []
+            access_denied = False
+            for source, url in endpoints:
+                if source in unavailable:
+                    failures.append({'source': source, **unavailable[source]})
+                    access_denied |= unavailable[source]['status'] == 'access_denied'
+                    continue
+                try:
+                    data = self._get_json(url, params={'view': 'META_ABS'},
+                                          headers=self.elsevier_headers('application/json'),
+                                          request_timeout=min(self.timeout, 20))
+                    abstract = elsevier_abstract(data)
+                    if abstract:
+                        record.update(abstract=abstract, abstract_source=source,
+                                      abstract_is_full=True, abstract_status='retrieved')
+                        break
+                    failures.append({'source': source, 'status': 'missing_in_response'})
+                except Exception as exc:
+                    response = getattr(exc, 'response', None)
+                    status_code = response.status_code if response is not None else None
+                    status = 'access_denied' if status_code in {401, 403} else 'request_failed'
+                    access_denied |= status == 'access_denied'
+                    failure = {'status': status, 'http_status': status_code, 'error': safe_error(exc)}
+                    failures.append({'source': source, **failure})
+                    # A denied endpoint or exhausted quota applies to the whole batch.
+                    if status_code in {401, 403, 429}:
+                        unavailable[source] = failure
+            if not record.get('abstract'):
+                record['abstract_status'] = ('access_denied' if access_denied else
+                                             'request_failed' if any(f['status'] == 'request_failed' for f in failures)
+                                             else 'missing_in_response')
+            if failures:
+                record['abstract_errors'] = failures
+            print(json.dumps({'abstract_progress': index, 'doi': doi,
+                              'status': record['abstract_status']}, ensure_ascii=False), flush=True)
 
     def search_springer(self, query, limit, from_year=None, to_year=None):
         if not self.springer_key:
@@ -637,18 +734,18 @@ class Harvester:
             return None
         destination = Path(destination)
         if destination.exists() and destination.stat().st_size > 20:
-            return {'status': 'existing_xml', 'path': str(destination.resolve()), **file_fingerprint(destination)}
+            try:
+                validate_elsevier_fulltext(destination.read_bytes())
+            except (ET.ParseError, ValueError):
+                pass  # Old META responses must be replaced by actual full text.
+            else:
+                return {'status': 'existing_xml', 'path': str(destination.resolve()), **file_fingerprint(destination)}
         url = f'https://api.elsevier.com/content/article/doi/{quote(doi, safe="")}'
-        headers = {'Accept': 'application/xml', 'X-ELS-APIKey': self.elsevier_key,
-                   'User-Agent': self.session.headers['User-Agent']}
-        if self.elsevier_insttoken:
-            headers['X-ELS-Insttoken'] = self.elsevier_insttoken
-        response = self.session.get(url, params={'httpAccept': 'text/xml'}, headers=headers,
+        response = self.session.get(url, params={'httpAccept': 'text/xml', 'view': 'FULL'},
+                                    headers=self.elsevier_headers('application/xml'),
                                     timeout=self.timeout)
         response.raise_for_status()
-        content = response.content.lstrip()
-        if not content.startswith(b'<?xml') and not content.startswith(b'<'):
-            raise ValueError('Elsevier response is not XML')
+        validate_elsevier_fulltext(response.content)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(response.content)
         return {'status': 'downloaded_xml', 'path': str(destination.resolve()), 'url': url,
@@ -734,6 +831,8 @@ def run_harvest(args):
         raise ValueError('Download limits, timeout, and delay must be non-negative and valid')
     if args.from_year and args.to_year and args.from_year > args.to_year:
         raise ValueError('--from-year cannot be later than --to-year')
+    if getattr(args, 'abstract_page_limit', 20) < 0:
+        raise ValueError('--abstract-page-limit cannot be negative')
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     queries = args.query or DEFAULT_QUERIES
@@ -747,25 +846,52 @@ def run_harvest(args):
                           elsevier_key=args.elsevier_key, springer_key=args.springer_key,
                           timeout=args.timeout)
     records, errors = [], []
-    for query in queries:
-        for source in sorted(sources):
-            try:
-                method = getattr(harvester, 'search_' + source)
-                records.extend(method(query, args.limit, args.from_year, args.to_year))
-            except Exception as exc:
-                errors.append({'stage': 'search', 'source': source, 'query': query,
-                               'error': safe_error(exc)})
+    metadata_path = getattr(args, 'records', None)
+    if metadata_path:
+        from .literature import load_metadata
+        records = load_metadata(metadata_path)
+        sources = set()  # Replay the saved inventory without repeating discovery.
+    else:
+        for query in queries:
+            for source in sorted(sources):
+                try:
+                    method = getattr(harvester, 'search_' + source)
+                    records.extend(method(query, args.limit, args.from_year, args.to_year))
+                except Exception as exc:
+                    errors.append({'stage': 'search', 'source': source, 'query': query,
+                                   'error': safe_error(exc)})
     records = merge_records(records)
+    default_library_parent = output.parent.parent if output.parent.name.lower() == 'runs' else output.parent
+    library_dir = (Path(args.library_dir).resolve() if getattr(args, 'library_dir', None)
+                   else default_library_parent / 'paper_library')
+    public_abstract_report = None
+    if getattr(args, 'public_abstracts', True) and records:
+        from .abstracts import enrich_public_abstracts
+        # Public metadata must not inherit publisher authentication headers or retries.
+        with requests.Session() as public_session:
+            public_session.headers['User-Agent'] = harvester.session.headers['User-Agent']
+            public_abstract_report = enrich_public_abstracts(
+                records, public_session, cache_dir=library_dir / 'abstracts', timeout=args.timeout,
+                openalex_key=harvester.openalex_key, email=harvester.email,
+                publisher_limit=getattr(args, 'abstract_page_limit', 20))
+    harvester.enrich_elsevier_abstracts(records)
     write_json(output / 'records.json', records)
     write_csv(output / 'records.csv', records)
+
+    screen_engine = getattr(args, 'screen_engine', 'rules')
+    screening_report = None
+    if screen_engine != 'none':
+        from .literature import screen_records, write_screening
+        config_path = getattr(args, 'screen_config', None)
+        config = json.loads(Path(config_path).read_text(encoding='utf-8-sig')) if config_path else None
+        records = screen_records(records, screen_engine, config, getattr(args, 'review_decisions', None),
+                                 read_json(args.score_config) if getattr(args, 'score_config', None) else None)
+        screening_report = write_screening(output, records, getattr(args, 'review_decisions', None))
 
     local_rows = inventory_local(args.local_papers)
     write_json(output / 'local_documents.json', local_rows)
     write_csv(output / 'local_documents.csv', local_rows)
 
-    default_library_parent = output.parent.parent if output.parent.name.lower() == 'runs' else output.parent
-    library_dir = (Path(args.library_dir).resolve() if getattr(args, 'library_dir', None)
-                   else default_library_parent / 'paper_library')
     manifest = []
     if args.download:
         attempted = 0
@@ -781,6 +907,7 @@ def run_harvest(args):
         download_order = sorted(
             enumerate(records),
             key=lambda pair: (
+                0 if pair[1].get('effective_decision') == 'target' else 1,
                 0 if (pair[1].get('doi') or '').startswith(oa_prefixes) else 1,
                 0 if pair[1].get('is_oa') else 1,
                 0 if pair[1].get('pdf_urls') else 1,
@@ -789,7 +916,17 @@ def run_harvest(args):
         )
         for _, record in download_order:
             row = {'record_id': record['record_id'], 'doi': record.get('doi'), 'title': record.get('title'),
-                   'status': 'not_attempted', 'path': None, 'url': None, 'errors': []}
+                   'status': 'not_attempted', 'path': None, 'url': None, 'errors': [],
+                   'screening_decision': record.get('effective_decision', 'not_screened'),
+                   'screening_reason': record.get('reason', '')}
+            if record.get('effective_decision') == 'non_target':
+                row['status'] = 'screened_out'
+                manifest.append(row)
+                continue
+            if record.get('effective_decision') == 'review' and not getattr(args, 'download_review', True):
+                row['status'] = 'awaiting_review'
+                manifest.append(row)
+                continue
             if attempted >= args.max_downloads:
                 row['status'] = 'download_limit'
                 manifest.append(row)
@@ -867,6 +1004,12 @@ def run_harvest(args):
                             row['status'] = 'downloaded_xml_only'
                             row['path'] = xml_result['path']
                 except Exception as exc:
+                    response = getattr(exc, 'response', None)
+                    status_code = response.status_code if response is not None else None
+                    row['elsevier_xml'] = {
+                        'status': 'access_denied' if status_code in {401, 403} else 'request_failed',
+                        'http_status': status_code, 'path': None, 'error': safe_error(exc),
+                    }
                     row['errors'].append('Elsevier: ' + safe_error(exc))
             springer_record = 'springer' in (record.get('source_names') or []) or any(
                 marker in publisher_text for marker in ['springer', 'nature'])
@@ -896,15 +1039,33 @@ def run_harvest(args):
                 time.sleep(args.delay)
     write_json(output / 'download_manifest.json', manifest)
     write_csv(output / 'download_manifest.csv', manifest)
+    extraction_manifest = {}
+    for row in manifest:
+        for document in [row, row.get('elsevier_xml') or {}, row.get('springer_jats') or {}]:
+            if document.get('path'):
+                extraction_manifest[Path(document['path']).name] = {
+                    'paper_id': row.get('doi') or row['record_id'],
+                    'doi': row.get('doi'), 'title': row.get('title'),
+                    'screening_decision': row.get('screening_decision'),
+                }
+    write_json(output / 'extraction_manifest.json', extraction_manifest)
     write_json(output / 'errors.json', errors)
     counts = {}
     for row in manifest:
         counts[row['status']] = counts.get(row['status'], 0) + 1
+    abstract_counts = {'available': sum(bool(row.get('abstract')) and row.get('abstract_is_full') is not False for row in records),
+                       'missing': sum(not row.get('abstract') or row.get('abstract_is_full') is False for row in records),
+                       'summary_only': sum(bool(row.get('abstract')) and row.get('abstract_is_full') is False for row in records),
+                       'access_denied': sum(row.get('abstract_status') == 'access_denied' for row in records),
+                       'request_failed': sum(row.get('abstract_status') == 'request_failed' for row in records)}
     summary = {'created_at': datetime.now(timezone.utc).isoformat(),
                'queries': queries, 'sources': sorted(sources), 'records': len(records),
                'local_documents': len(local_rows), 'search_errors': len(errors),
-               'download_status': counts, 'output': str(output),
-               'paper_library': str(library_dir)}
+               'download_status': counts, 'abstract_status': abstract_counts, 'output': str(output),
+               'paper_library': str(library_dir), 'screening': screening_report,
+               'public_abstracts': public_abstract_report,
+               'metadata_input': str(Path(metadata_path).resolve()) if metadata_path else None,
+               'download_review': getattr(args, 'download_review', True)}
     write_json(output / 'summary.json', summary)
     print(json.dumps(summary, ensure_ascii=False))
-    return 2 if sources and not records and errors else 0
+    return 2 if (sources and not records and errors) or (screening_report and screening_report['ai_errors']) else 0

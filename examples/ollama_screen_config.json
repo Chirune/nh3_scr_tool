@@ -1,0 +1,6 @@
+{
+  "base_url": "http://localhost:11434/v1",
+  "model": "YOUR_INSTALLED_MODEL",
+  "api_key_env": "OLLAMA_API_KEY",
+  "timeout": 60
+}

@@ -13,8 +13,10 @@ from .extract import rule_records, table_records, llm_records
 
 def run_screen(args):
     from .screening import screen_directory
-    report = screen_directory(args.input, args.output, args.pages)
+    report = screen_directory(args.input, args.output, args.pages, args.engine,
+                              read_json(args.config) if args.config else None, args.review_decisions)
     print(json.dumps(report, ensure_ascii=False))
+    return 2 if report['ai_errors'] else 0
 
 
 def run_extract(args):
@@ -23,7 +25,7 @@ def run_extract(args):
     if output == root or root in output.parents and root.is_file():
         raise ValueError('Output must be a separate directory')
     output.mkdir(parents=True, exist_ok=True)
-    supported = {'.pdf', '.md', '.txt', '.html', '.htm', '.json', '.csv', '.tsv', '.xlsx'}
+    supported = {'.pdf', '.md', '.txt', '.html', '.htm', '.json', '.csv', '.tsv', '.xlsx', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp'}
     excluded = {Path(p).resolve() for p in [args.config, args.mapping, args.manifest] if p}
     paths = [root] if root.is_file() else sorted(p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in supported and output not in p.parents and p not in excluded and not p.name.endswith('.provenance.json'))
     if not paths:
@@ -32,9 +34,11 @@ def run_extract(args):
     if args.engine == 'llm' and not config:
         raise ValueError('--engine llm requires --config')
     mapping = read_json(args.mapping) if args.mapping else None
-    manifest = read_json(args.manifest) if args.manifest else {}
+    batch_manifest = (root.parent if root.is_dir() else root.parent.parent) / 'extraction_manifest.json'
+    manifest = read_json(args.manifest) if args.manifest else (read_json(batch_manifest) if batch_manifest.is_file() else {})
     from .documents import classify_document
-    records, sources, documents, errors, queue = [], [], [], [], []
+    from .semantics import semantic_records
+    records, sources, documents, errors, queue, claims = [], [], [], [], [], []
     for path in paths:
         relative = path.name if root.is_file() else path.relative_to(root).as_posix()
         meta = manifest.get(relative, {})
@@ -58,6 +62,8 @@ def run_extract(args):
             )
         for block in source_blocks:
             sources.append(block)
+            if 'row' not in block and getattr(args, 'semantics', True):
+                claims.extend(semantic_records(block))
             if block.get('needs_ocr') or block['kind'] in ['image', 'chart']:
                 queue.append({'block_id': block['block_id'], 'file': str(path), 'locator': block['locator'], 'reason': 'needs_ocr_or_curve_digitization', 'image_path': block.get('image_path')})
             try:
@@ -82,10 +88,13 @@ def run_extract(args):
     write_json(output / 'documents.json', documents)
     write_json(output / 'errors.json', errors)
     write_json(output / 'review_queue.json', queue)
+    claims = list({r['claim_id']: r for r in claims}.values())
+    write_json(output / 'semantic_candidates.json', claims)
+    write_csv(output / 'semantic_candidates.csv', claims)
     write_csv(output / 'candidates.csv', records)
     write_csv(output / 'decisions_template.csv', ({'record_id': r['record_id'], 'decision': '', 'reviewer': '', 'note': ''} for r in records), ['record_id', 'decision', 'reviewer', 'note'])
     type_counts = {kind: sum(d['document_type'] == kind for d in documents) for kind in sorted({d['document_type'] for d in documents})}
-    report = dict(files=len(paths), blocks=len(sources), candidates=len(records), errors=len(errors), unresolved_blocks=len(queue), document_types=type_counts, engine=args.engine, reaction=args.reaction)
+    report = dict(files=len(paths), blocks=len(sources), candidates=len(records), semantic_candidates=len(claims), errors=len(errors), unresolved_blocks=len(queue), document_types=type_counts, engine=args.engine, reaction=args.reaction)
     write_json(output / 'run_report.json', report)
     print(json.dumps(report, ensure_ascii=False))
     return 2 if errors else 0
@@ -128,7 +137,7 @@ def run_export(args):
         if r['property'] not in ['t50', 't90'] and conditions.get('temperature', {}).get('value') is None:
             withheld.append(dict(record_id=r['record_id'], reason='missing_explicit_reaction_temperature'))
             continue
-        flat = {k: r.get(k) for k in ['record_id', 'paper_id', 'catalyst', 'experiment_id', 'property', 'value', 'unit', 'source_file', 'locator', 'method', 'source_kind', 'estimated', 'reviewer', 'review_level']}
+        flat = {k: r.get(k) for k in ['record_id', 'paper_id', 'doi', 'catalyst', 'experiment_id', 'property', 'value', 'unit', 'source_file', 'locator', 'method', 'source_kind', 'estimated', 'value_origin', 'digitization_group', 'reviewer', 'review_level']}
         flat['split_group'] = r['paper_id']
         for key in FIELDS:
             if FIELDS[key][0] == 'condition':
@@ -225,7 +234,23 @@ def main():
     p = sub.add_parser('screen', help='Inventory and screen local PDFs for NH3-SCR relevance')
     p.add_argument('input'); p.add_argument('-o', '--output', required=True)
     p.add_argument('--pages', type=int, choices=range(1, 6), default=2)
+    p.add_argument('--engine', choices=['rules', 'llm'], default='rules')
+    p.add_argument('--config', help='OpenAI-compatible AI endpoint configuration')
+    p.add_argument('--review-decisions', help='Previously filled literature review CSV')
     p.set_defaults(func=run_screen)
+    p = sub.add_parser('screen-metadata', help='Screen saved titles/abstracts before full-text download')
+    p.add_argument('input'); p.add_argument('-o', '--output', required=True)
+    p.add_argument('--engine', choices=['rules', 'llm'], default='rules')
+    p.add_argument('--config'); p.add_argument('--review-decisions'); p.add_argument('--score-config')
+    def screen_metadata_command(a):
+        from .literature import load_metadata, screen_records, write_screening
+        rows = screen_records(load_metadata(a.input), a.engine,
+                              read_json(a.config) if a.config else None, a.review_decisions,
+                              read_json(a.score_config) if a.score_config else None)
+        report = write_screening(a.output, rows, a.review_decisions)
+        print(json.dumps(report, ensure_ascii=False))
+        return 2 if report['ai_errors'] else 0
+    p.set_defaults(func=screen_metadata_command)
     p = sub.add_parser('vector', help='Extract discrete PDF plot markers using a visually calibrated profile')
     p.add_argument('input'); p.add_argument('--profile', required=True); p.add_argument('-o', '--output', required=True)
     def vector_command(a):
@@ -250,6 +275,8 @@ def main():
     p.add_argument('--engine', choices=['rules', 'llm'], default='rules')
     p.add_argument('--config'); p.add_argument('--mapping'); p.add_argument('--manifest')
     p.add_argument('--paper-id'); p.add_argument('--reaction', default='NH3-SCR'); p.add_argument('--max-chars', type=int, default=24000)
+    p.add_argument('--semantics', action=argparse.BooleanOptionalAction, default=True,
+                   help='Also collect comparative/qualitative statements as separate review candidates')
     p.set_defaults(func=run_extract)
     p = sub.add_parser('convert', help='Call an installed MinerU or Marker CLI')
     p.add_argument('input'); p.add_argument('-o', '--output', required=True)
@@ -266,6 +293,12 @@ def main():
     p = sub.add_parser('digitize', help='Convert manually selected pixel coordinates to data')
     p.add_argument('points'); p.add_argument('--calibration', required=True); p.add_argument('--catalyst', required=True)
     p.add_argument('--figure', required=True); p.add_argument('-o', '--output', required=True); p.set_defaults(func=run_digitize)
+    p = sub.add_parser('figure-import', help='Import a figure reader snapshot as pending scientific observations')
+    p.add_argument('input'); p.add_argument('--mapping', required=True); p.add_argument('-o', '--output', required=True)
+    def figure_import_command(a):
+        from .figure_import import import_figure
+        print(json.dumps(import_figure(a.input, read_json(a.mapping), a.output), ensure_ascii=False))
+    p.set_defaults(func=figure_import_command)
     p = sub.add_parser('pick', help='Click PNG curve points in a local Tk window')
     p.add_argument('image'); p.add_argument('-o', '--output', required=True); p.set_defaults(func=run_pick)
     p = sub.add_parser('search', help='Search Crossref bibliographic metadata, requires network')
@@ -281,6 +314,17 @@ def main():
     p.add_argument('--elsevier-key', help='Elsevier API key; or set ELSEVIER_API_KEY')
     p.add_argument('--springer-key', help='Springer Nature API key; or set SPRINGER_API_KEY')
     p.add_argument('--local-papers', action='append', default=[], help='Inventory a local paper directory; repeat if needed')
+    p.add_argument('--records', help='Reuse saved metadata JSON/CSV, without repeating online searches')
+    p.add_argument('--public-abstracts', action=argparse.BooleanOptionalAction, default=True,
+                   help='Fill missing abstracts from DOI-matched public metadata and publisher pages')
+    p.add_argument('--abstract-page-limit', type=int, default=20,
+                   help='Maximum publisher pages to attempt after public metadata (default 20)')
+    p.add_argument('--screen-engine', choices=['rules', 'llm', 'none'], default='rules')
+    p.add_argument('--screen-config', help='AI screening endpoint configuration; required for llm')
+    p.add_argument('--score-config', help='JSON weights for literature reading priority (does not change screening decisions)')
+    p.add_argument('--review-decisions', help='Filled manual_review_template.csv')
+    p.add_argument('--download-review', action=argparse.BooleanOptionalAction, default=True,
+                   help='Keep uncertain papers in download scope; disable to await manual review')
     p.add_argument('--download', action=argparse.BooleanOptionalAction, default=True)
     p.add_argument('--max-downloads', type=int, default=20)
     p.add_argument('--max-file-mb', type=int, default=100)

@@ -16,3 +16,25 @@ mineru.json
 node_modules/
 *.egg-info/
 .pytest_cache/
+
+# Local builds and paper-specific working data.
+/build/
+/dist/
+/release/
+/evaluation/
+/artifact_work/
+/PROJECT_PROGRESS.md
+/USER_ACTIONS.md
+/REAL_PAPER_TEST.md
+*.exe
+*.zip
+*.log
+*.docx
+*.xlsx
+*.xls
+*.png
+*.jpg
+*.jpeg
+
+# Unpublished planning is separate from this progress-sharing repository.
+/docs/PATENT_DEVELOPMENT_PLAN_20260929.md

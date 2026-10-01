@@ -100,8 +100,13 @@ class ApiTestWindow:
                 self.write(f"[{name}] XML 状态：{row['elsevier_xml'].get('status')}")
             for error in row.get('errors') or []:
                 self.write(f'[{name}] {error}')
-        ok = process.returncode == 0 and not errors
-        self.write(f'[{name}] ' + ('接口检索正常。' if ok else '存在错误，请查看上面的状态。'))
+        publisher_result = next((row.get('elsevier_xml' if name == 'Elsevier' else 'springer_jats')
+                                 for row in manifest
+                                 if row.get('elsevier_xml' if name == 'Elsevier' else 'springer_jats')), {})
+        fulltext_ok = bool(publisher_result.get('path'))
+        ok = process.returncode == 0 and not errors and fulltext_ok
+        self.write(f'[{name}] 全文接口：' + ('已取得文件。' if fulltext_ok else '未取得全文，不能判定全文接口测试成功。'))
+        self.write(f'[{name}] ' + ('测试通过。' if ok else '存在错误或全文权限不足，请查看上面的状态。'))
         self.write(f'[{name}] 结果目录：{output}\n')
         return ok
 

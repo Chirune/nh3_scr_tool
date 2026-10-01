@@ -1,0 +1,10 @@
+{
+  "weights": {
+    "reaction": 40,
+    "material": 15,
+    "experimental": 15,
+    "performance": 10,
+    "conditions": 10,
+    "characterization": 10
+  }
+}

@@ -38,6 +38,10 @@ def run_case(name, query, sources, output):
             print(f"  - Springer JATS: {row['springer_jats'].get('status')}")
         for error in row.get('errors') or []:
             print(f"  - 下载信息: {error}")
+    publisher_field = 'elsevier_xml' if name == 'Elsevier' else 'springer_jats'
+    if not any((row.get(publisher_field) or {}).get('path') for row in manifest):
+        errors.append({'source': name, 'error': '未取得出版社全文；全文接口测试未通过。'})
+        print(f'[{name}] 未取得出版社全文；全文接口测试未通过。')
     print(f"[{name}] 详细结果: {output}")
     return completed.returncode, errors
 

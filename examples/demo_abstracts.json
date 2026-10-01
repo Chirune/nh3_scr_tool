@@ -1,0 +1,16 @@
+[
+  {
+    "doi": "10.9999/synthetic-demo-a",
+    "title": "SOFTWARE DEMO ONLY: Cu-A catalyst for NH3-SCR (not a real paper)",
+    "abstract": "This is a synthetic software demonstration, not a published experiment. A fictional Cu-A catalyst was prepared for an NH3-SCR workflow demonstration. NOx conversion, reaction temperature, copper loading, and selectivity are mentioned to exercise literature sorting and human review. No measurement in this item is suitable for scientific analysis or machine learning.",
+    "abstract_source": "synthetic_software_demo",
+    "abstract_is_full": true
+  },
+  {
+    "doi": "10.9999/synthetic-demo-b",
+    "title": "SOFTWARE DEMO ONLY: review-like article (not a real paper)",
+    "abstract": "This is a synthetic software demonstration and does not represent a published paper. The fictional article reviews literature about selective catalytic reduction catalysts, temperatures, and materials rather than reporting its own experiment. It is included so a user can practice marking a record as unrelated or non-original research.",
+    "abstract_source": "synthetic_software_demo",
+    "abstract_is_full": true
+  }
+]

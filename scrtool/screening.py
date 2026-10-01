@@ -178,16 +178,20 @@ def screen_file(path: Path, pages: int = 2) -> dict:
     }
 
 
-def screen_directory(input_path: str | Path, output_path: str | Path, pages: int = 2) -> dict:
+def screen_directory(input_path: str | Path, output_path: str | Path, pages: int = 2,
+                     engine="rules", config=None, decisions_path=None) -> dict:
     root = Path(input_path).resolve()
     pdfs = [root] if root.is_file() and root.suffix.lower() == ".pdf" else sorted(root.rglob("*.pdf"))
     if not pdfs:
         raise ValueError("No PDF files found")
     rows = [screen_file(path, pages) for path in pdfs]
+    from .literature import screen_records, write_screening
+    rows = screen_records([dict(r, record_id=uid(r['source_sha256'])) for r in rows], engine, config, decisions_path)
     out = Path(output_path).resolve()
     out.mkdir(parents=True, exist_ok=True)
     write_json(out / "literature_manifest.json", rows)
     write_csv(out / "literature_manifest.csv", rows)
+    semantic_report = write_screening(out, rows, decisions_path)
     review_fields = ["paper_id", "doi", "filename", "title", "auto_decision", "manual_decision", "reviewer_notes", "reason", "source_path"]
     write_csv(
         out / "manual_review.csv",
@@ -195,6 +199,6 @@ def screen_directory(input_path: str | Path, output_path: str | Path, pages: int
         review_fields,
     )
     counts = {decision: sum(row["effective_decision"] == decision for row in rows) for decision in sorted(DECISIONS)}
-    report = {"input": str(root), "pdfs": len(rows), "counts": counts, "needs_ocr": sum(bool(row["needs_ocr"]) for row in rows), "errors": sum(bool(row["error"]) for row in rows)}
+    report = {**semantic_report, "input": str(root), "pdfs": len(rows), "counts": counts, "needs_ocr": sum(bool(row["needs_ocr"]) for row in rows), "errors": sum(bool(row["error"]) for row in rows)}
     write_json(out / "screening_report.json", report)
     return report

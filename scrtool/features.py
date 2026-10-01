@@ -24,6 +24,8 @@ def build_features(records, out):
                    target_property=r['property'], target_value=r['value'], target_unit=r['unit'],
                    target_record_id=r['record_id'], estimated=r['estimated'], review_level=r.get('review_level'),
                    figure=r.get('figure'), source_locator=r['locator'])
+        row.update(doi=r.get('doi'), digitization_group=r.get('digitization_group'),
+                   value_origin=r.get('value_origin'))
         for key, q in r['conditions'].items():
             row['condition_' + key] = q['value']
         for prop, candidates in features[(r['paper_id'], r['catalyst'])].items():

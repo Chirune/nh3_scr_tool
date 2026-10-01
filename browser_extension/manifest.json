@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "NH3-SCR 摘要采集按钮",
+  "version": "0.2.0",
+  "description": "用户点击后读取当前论文页摘要和题录，保存为本地 JSON，交给摘要采集 EXE 初筛。",
+  "permissions": ["activeTab", "scripting"],
+  "action": {"default_title": "采集当前论文摘要", "default_popup": "popup.html"}
+}

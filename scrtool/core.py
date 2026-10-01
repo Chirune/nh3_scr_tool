@@ -183,6 +183,8 @@ def make_record(block, catalyst, prop, raw, unit, evidence, conditions=None, met
         'source_row': block.get('row'),
         'review_status': 'pending',
     }
+    if block.get('doi'):
+        record['doi'] = block['doi']
     record['record_id'] = uid(record)
     return record
 
