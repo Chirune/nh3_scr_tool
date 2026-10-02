@@ -15,7 +15,7 @@
 
 ## 文献数据工作台 EXE 0.8（推荐入口）
 
-本地交付目录为 `artifact_work/NH3SCR_Workbench_0.8/`。其中的 `NH3SCR_Workbench.exe` 无需安装 Python；EXE 和内置论文摘要不放入 GitHub 源码提交。从 GitHub 克隆后，可按下文安装依赖并运行源码，再导入自己的摘要、PDF 和表格。
+公开交付包为 `NH3SCR_Workbench_0.8_Windows.zip`，解压后双击 `NH3SCR_Workbench.exe`，无需安装 Python；包中还包含 Chrome 插件和操作说明，只内置两条合成演示摘要。公开版构建目录为 `artifact_work/NH3SCR_Workbench_0.8_Public/`；原 `artifact_work/NH3SCR_Workbench_0.8/` 是含本地论文摘要的内部版本。EXE 作为 Release 附件，不放入源码提交。从 GitHub 克隆后，可按下文安装依赖并运行源码，再导入自己的摘要、PDF 和表格。详见[0.8 发布说明与已知限制](docs/RELEASE_0.8.md)。
 
 每条待审核数据旁边显示具体核对问题、原文证据和 PDF 原始页；可双击页图放大。审核自动保存，只有人工通过的数据才进入审核结果，缺温度等不满足条件的性能记录暂缓导出。详细步骤见[工作台简易操作说明](docs/WORKBENCH_QUICKSTART.md)。
 
