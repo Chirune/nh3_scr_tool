@@ -1,7 +1,11 @@
-# GitHub 进度分享说明
+# 当前 GitHub 分享范围
 
-这次提交聚焦**一个可阅读的进度页和能复现的软件源码**。从仓库首页进入[项目进度](PROJECT_STATUS_2026-10-01.md)，可以看到当前阶段、已验证的功能、真实论文小样结果与下一步。
+本次共享为2026.10.09最新三板块、整合入口及使用教程。只新增当前运行代码，不上传各次本地交付的旧版本、更新前备份或历史压缩包。组员原有采集源码保留。
 
-仓库保留 `scrtool/`、`scripts/`、`browser_extension/`、`tests/`、`examples/` 和精简说明。以下材料仍留在本地：`evaluation/` 自动生成的测试输出、`output/` 科研运行结果、`release/` EXE、`build/` 和 `dist/`、真实论文 PDF、个人项目、密钥、专利计划，以及旧的详细进度/真实论文报告。历史上已跟踪的详细结果会从 Git 索引移除，本机文件不删除。
+源码保留：`catalyst_workbench/`、`modules/`、整合入口、安装/验证脚本、教程与合成示例生成器。沿用原仓库的 `scrtool/`、浏览器扩展、示例和测试。四种可下载压缩包发布到GitHub Release，构建产物不放进Git索引。
 
-本地提交完成后，在项目目录运行 `git status` 查看待上传的提交，再运行 `git push origin main`。EXE 与源码压缩包作为 GitHub Release 附件发布；不要把构建产物塞进源码提交。2026-10-02 的公开交付范围及构建方法见[0.8 发布说明](RELEASE_0.8.md)，公开版使用合成示例，不内置本地论文摘要。
+不随公开仓库发布：个人PPT、专利及辅助资料、真实论文全文、科研运行与审核档案、Zotero数据库、账号密码、API密钥、模型权重、虚拟环境与本机配置。`.gitignore`忽略这些常见目录/扩展，但提交者仍需核对暂存文件。
+
+新数据默认位于 `runtime_data/`，翻译模型位于 `local_models/translation/`。如需分享科研数据，请先确定数据范围与访问权限；不能把整个个人工作目录当作源码上传。
+
+最新版教程：[QUICKSTART](workbench/QUICKSTART.md)；团队分工：[代码地图](workbench/ARCHITECTURE.md)。

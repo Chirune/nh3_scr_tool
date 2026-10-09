@@ -1,0 +1,13 @@
+{
+  "version": "2026.10.09",
+  "entry": "start_workbench.cmd",
+  "modules": [
+    "modules/stage1",
+    "modules/stage2",
+    "modules/stage3"
+  ],
+  "tutorial": "docs/workbench/tutorial.html",
+  "data_directory": "runtime_data",
+  "private_materials_included": false,
+  "new_model_trained": false
+}

@@ -38,3 +38,12 @@ node_modules/
 
 # Unpublished planning is separate from this progress-sharing repository.
 /docs/PATENT_DEVELOPMENT_PLAN_20260929.md
+
+# Current shared workbench: local-only runs, models and private documents.
+/runtime_data/
+/local_models/
+/private/
+*.pptx
+*.ppt
+*.7z
+*.argosmodel

@@ -1,0 +1,387 @@
+{
+  "version": "2026.10.09",
+  "source_snapshot": "2026-10-08 current desktop program",
+  "scope": "Executable source and synthetic tests only. No private PDFs, PPTs, patents, model weights or saved projects.",
+  "files": [
+    {
+      "path": "catalyst_workbench/app.py",
+      "source_sha256": "fc00fa213b9d23646d84ec5ee8861a1dece705534825bfd97c4ee026b2bb95d6"
+    },
+    {
+      "path": "catalyst_workbench/candidate_policy.py",
+      "source_sha256": "0e5a3fbb0a2b86b7d03ae6fab49ba0624d6e91b439066b496a6f06769ff18691"
+    },
+    {
+      "path": "catalyst_workbench/coding_app.py",
+      "source_sha256": "5552ba936dbdafe826b756044ea9cb0e4baa19bc093c35f50187bd98c995f655"
+    },
+    {
+      "path": "catalyst_workbench/intake.py",
+      "source_sha256": "8850983cc4e4e4f08361c7c6391a6bd8d4dc552623f0f2821b47542dd68f1be8"
+    },
+    {
+      "path": "catalyst_workbench/locate.py",
+      "source_sha256": "5886353ff817b122aec109d6c7be233c1f13ab257419f65974425e4e41e82811"
+    },
+    {
+      "path": "catalyst_workbench/ml_preparation.py",
+      "source_sha256": "f09614aa49a587fcd1089a22b6aee5a9c9e336280e8ea92b812a913d84b9f356"
+    },
+    {
+      "path": "catalyst_workbench/ml_preparation_ui.py",
+      "source_sha256": "2063725fe26c26b9810a51b811dea8ebc8d49d431dd24031bf1a1189710c8253"
+    },
+    {
+      "path": "catalyst_workbench/paper_app.py",
+      "source_sha256": "45b54ce1d6080c81bbf836c785af2ab719c1978e3e6be0f04bcf54c0d910ee7b"
+    },
+    {
+      "path": "catalyst_workbench/paper_encoding.py",
+      "source_sha256": "33a117912ef20148044391c61f2b95e3f6511b2c26e1218a03edc15118650d23"
+    },
+    {
+      "path": "catalyst_workbench/paper_glossary.py",
+      "source_sha256": "274b65759cd168fa192c057478c093c016e998e6185b56e4fcee492746876c7f"
+    },
+    {
+      "path": "catalyst_workbench/paper_image_bridge.py",
+      "source_sha256": "ed816013e40ccfe497c6fb1b4a53125268c78b240aef1ad42200e448f188a1b4"
+    },
+    {
+      "path": "catalyst_workbench/paper_numeric.py",
+      "source_sha256": "6ab1b3bd489f61661059fd42664a6bd6e8d4cd86025a593b625f48fe21c7675c"
+    },
+    {
+      "path": "catalyst_workbench/paper_numeric_view.py",
+      "source_sha256": "b68885878a0aa78347ba01a31fee40a1c30884a13643ca1e21af0adf660152ac"
+    },
+    {
+      "path": "catalyst_workbench/paper_reading.py",
+      "source_sha256": "4124957e8e9756ca1fe428fdb7b6b71acbab38d7546473dd38ede3d3121e6c01"
+    },
+    {
+      "path": "catalyst_workbench/paper_relations.py",
+      "source_sha256": "dfa6a60d2afb2ffa96342ff4565cf29c7f99a3a0de0ec88095edc3daab4a6988"
+    },
+    {
+      "path": "catalyst_workbench/paper_scoring.py",
+      "source_sha256": "83a26ed9267c77330a9b05ee29c4d11cca79864659451a4dee9afc8b4546bc1d"
+    },
+    {
+      "path": "catalyst_workbench/paper_semantic_audit.py",
+      "source_sha256": "defd8cb780fc20480c0d38bf83e27cfe886f9244229bdd3627b1ce6762cf7eb0"
+    },
+    {
+      "path": "catalyst_workbench/paper_semantic_facets.py",
+      "source_sha256": "90c043d79eb20776b653d07d59cd33372862b859201f47de7ccc42737128faa9"
+    },
+    {
+      "path": "catalyst_workbench/paper_semantic_report.py",
+      "source_sha256": "7fe6c65854a5352ba7f3f4acacc8a8a171f86d46b223a196bec3cf9ea36a4143"
+    },
+    {
+      "path": "catalyst_workbench/paper_semantics.py",
+      "source_sha256": "3ee4440286cd9735fc1d61784b10e6a3278b6e47e8f7cca4b53ac40de823cf80"
+    },
+    {
+      "path": "catalyst_workbench/paper_translation_hints.py",
+      "source_sha256": "15b39ec64d7c96508845ef47dbc583012cda5730820f8bf1915d494f88ffc03d"
+    },
+    {
+      "path": "catalyst_workbench/paper_translation_worker.py",
+      "source_sha256": "89ce8de596ddaf2112ec7fb60403b3b0671f5730ddff9657584234b942182653"
+    },
+    {
+      "path": "catalyst_workbench/paper_workspace.py",
+      "source_sha256": "34e7235ab5d67d1839ce08725c36101f34dc1087150b5af1835b800ac71c6568"
+    },
+    {
+      "path": "catalyst_workbench/pipeline.py",
+      "source_sha256": "57f32cad889d7f8c29843aa1725e95c1fed7ae6813a1ce2b205ccb6b1ed1f6f8"
+    },
+    {
+      "path": "catalyst_workbench/scoring_ui.py",
+      "source_sha256": "b61eeb9f41deded5f6c97cfb31a7473d2f0d215d8c197d879ad2131e78a5bd86"
+    },
+    {
+      "path": "catalyst_workbench/test_caption_policy.py",
+      "source_sha256": "5ad68aea931e3d6ec26b955a3a03a971cb6e258ed253d1f5214a2a3cd6f1f610"
+    },
+    {
+      "path": "catalyst_workbench/test_coding_app.py",
+      "source_sha256": "5420be05213028e70583b92d97bb4dc648d962a8d97d42c222415202f65aa8ab"
+    },
+    {
+      "path": "catalyst_workbench/test_competition_encoding.py",
+      "source_sha256": "e5cc0a5fa0ea00606c7525b2e0239f489f19708a5bd0ed00ab55ef558760fbea"
+    },
+    {
+      "path": "catalyst_workbench/test_gui.py",
+      "source_sha256": "c4c9bbf71dd53e56b7a7fc7d36987d113505017adef609fe282e7c2425d17a68"
+    },
+    {
+      "path": "catalyst_workbench/test_intake.py",
+      "source_sha256": "ccaed1af49e707829d8600efdb9f52b70f60503a2f9a0d0b5f04d2fc59af7979"
+    },
+    {
+      "path": "catalyst_workbench/test_locate.py",
+      "source_sha256": "861c8664e6929ffc55cd9218167253771070bd261a3c9be77d1e55e8b3eb6857"
+    },
+    {
+      "path": "catalyst_workbench/test_ml_preparation.py",
+      "source_sha256": "53d7d47e5823b7b68e5d13cf72314150a488124d08b970e1bb6e7f945435fcfe"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_app.py",
+      "source_sha256": "29e3c4f37064f7846d6d771a0a0154226693b4292c33b26da676c17a411d6df3"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_encoding.py",
+      "source_sha256": "f67878eb6295fb99143f4cc499f14b4a1307f0107bb5ee4ed4bcb39b7ba0b5b9"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_glossary.py",
+      "source_sha256": "7ba3ff5d39d74980193dec04d2fe3df80445118fd9b3c702c5400efb78a80986"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_image_bridge.py",
+      "source_sha256": "704f136ce5a4ee3b65d379b60f7275d259ea45c81f0953e7417533c0ba0e015a"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_numeric.py",
+      "source_sha256": "b060115961857171f09da48cc86926967a6c7f592c50292ade0f1cb58d5e5b4e"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_numeric_view.py",
+      "source_sha256": "76ea13aaaebd1b3e490ecaa0295bf3e61e0e2a029cd36aaa4dd1c5ee147a428f"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_reading.py",
+      "source_sha256": "939e3a789ed8f6d3831a06f7ce9fd053dca8c7e6d7d775fc4fec1ab096a56be5"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_relations.py",
+      "source_sha256": "3a50f5629ccfe9d1f541b66513247e255de2f7a22f171c008c269c1164942d56"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_scoring.py",
+      "source_sha256": "fda9d65c6b639bfc2f9a962cf4b1a22625fbfa20e610252ebca5f906f78b6405"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_semantic_facets.py",
+      "source_sha256": "08166af7febca390dcb6a6f963c665f078fad1a1c0746badd956e27fabd54b9f"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_semantics.py",
+      "source_sha256": "eb9d03947ce979de9db71c1a14ac2e30dbc1fa1d695d9b5620c7bcd581d1ee87"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_translation_hints.py",
+      "source_sha256": "b4f6b8357992568cbbecc048478b443dcd94056452846630e733c4bd02a09318"
+    },
+    {
+      "path": "catalyst_workbench/test_paper_workspace.py",
+      "source_sha256": "6b426cd19e8edc5b487ae042be14e7adf3c29be9706a8c2bc9f31590b686d2c8"
+    },
+    {
+      "path": "catalyst_workbench/test_pipeline.py",
+      "source_sha256": "bd9b5c85eaa6dd76f9fa21c91b3a2424e6d65c019625372cd2501bf14bcb71ec"
+    },
+    {
+      "path": "catalyst_workbench/test_semantic_adoption.py",
+      "source_sha256": "6492ac444a840e15f2b5dd36306915a095b2de83591fac39ffbccf3dc9013909"
+    },
+    {
+      "path": "catalyst_workbench/test_semantic_audit.py",
+      "source_sha256": "61a7b281640076ddc2fad7fbe3e7fb0efe249e6d102fd7a0f6eac1369b298bde"
+    },
+    {
+      "path": "catalyst_workbench/test_workbench_v2.py",
+      "source_sha256": "2dca8f2093e2d540346c3020de3edeb8e175c295c6d82a3e9898fb647385a53e"
+    },
+    {
+      "path": "catalyst_workbench/gateway/adapters.py",
+      "source_sha256": "09f087d03102f6e691a0e2967f01d2c978111b36c5ae43dd2dbd2d381b54fd7a"
+    },
+    {
+      "path": "catalyst_workbench/gateway/app.py",
+      "source_sha256": "551459dcc0a9dc232bc57072d7b08c14b963434b04de510d1d1965c0f3de2da4"
+    },
+    {
+      "path": "catalyst_workbench/gateway/elsevier_api.py",
+      "source_sha256": "cebeb87a7e50a899f67670c137892d7b4d9510a8767c8d255c81f8cd19ae525b"
+    },
+    {
+      "path": "catalyst_workbench/gateway/engine.py",
+      "source_sha256": "90f7a814bee334b7a23fe357903ae83a08253405a532333add9036037514a734"
+    },
+    {
+      "path": "catalyst_workbench/gateway/pdf_fetch.py",
+      "source_sha256": "b80597a37f395d148b91ac35a274541d06bd91909d48bf63c50b1e23958c1c37"
+    },
+    {
+      "path": "catalyst_workbench/gateway/publisher_api_ui.py",
+      "source_sha256": "169db5afb12d138c4726e74f58eae4a95da390d4f51169265096327a2fe1a1e3"
+    },
+    {
+      "path": "catalyst_workbench/gateway/publisher_clients.py",
+      "source_sha256": "fb13c63c089235c43241a26b1452a1ce6c10e2083f39c4a254d99f9e4a14c702"
+    },
+    {
+      "path": "catalyst_workbench/gateway/rules.py",
+      "source_sha256": "d95dd7db04b671fbbafdc15dc45ca0d138a3970c5a193d3ac4ccf91d5b83b20b"
+    },
+    {
+      "path": "catalyst_workbench/gateway/test_elsevier_api.py",
+      "source_sha256": "0c7af1f207d40fbd6f8a305248071c55b7979dad2783279cab1f661197484a61"
+    },
+    {
+      "path": "catalyst_workbench/gateway/test_fulltext_access.py",
+      "source_sha256": "11f0580d190304d63bc73fce522edcbf62781a9812516f808b2b7646b9de8e78"
+    },
+    {
+      "path": "catalyst_workbench/gateway/test_layout.py",
+      "source_sha256": "243409221d53d7c1fac58168987d84bb1d2f11f8a49d018b51fba52c7d73efa9"
+    },
+    {
+      "path": "catalyst_workbench/gateway/test_local_entry.py",
+      "source_sha256": "b3d2ce69657ba2e08f706a2aa32ca67ebc4c5117f41fc6cc57ab474468b063f9"
+    },
+    {
+      "path": "catalyst_workbench/gateway/test_pdf_fetch.py",
+      "source_sha256": "cb50d8a58e476bbe0ddfd00e0b60f33567b1fc5dd209ad741ac7bfcbf4489f3a"
+    },
+    {
+      "path": "catalyst_workbench/gateway/test_pdf_identity.py",
+      "source_sha256": "46e753cbaf009573a2ca0f5a8e38223575a5a4dffdb07a28976d2e8474059f75"
+    },
+    {
+      "path": "catalyst_workbench/gateway/test_publisher_clients.py",
+      "source_sha256": "e734e820ebbb75b14f7b4f70a9580a42139487f9b754f8554aeed86c8730081e"
+    },
+    {
+      "path": "catalyst_workbench/gateway/test_zotero_bridge.py",
+      "source_sha256": "a7da9b555f843d7920351da24bdd625c52692605078afee29849b87bda99f3e8"
+    },
+    {
+      "path": "catalyst_workbench/gateway/zotero_bridge.py",
+      "source_sha256": "51e267067cb6d0685572941465809a62d7b592cb2d5b372c8a8a7808226f294e"
+    },
+    {
+      "path": "catalyst_workbench/gateway/zotero_ui.py",
+      "source_sha256": "103f461b4283304566e4b8c8e8402ea8b86b6404b7737b906485a687343ba530"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/__init__.py",
+      "source_sha256": "8ff857d04f45a7ef33485eb6b279b184a7483a88ba91b09b2bd534cf3b39db46"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/app.py",
+      "source_sha256": "0667eb200288ec5448f3a95e0a0ca9eb773992539e10529ab05c8f7937b87f98"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/auto_axes.py",
+      "source_sha256": "94147c0f94901469e7a2adf309b569dcf9c8d39b8ab811aa0262a5ea99ae1194"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/auto_bars.py",
+      "source_sha256": "f7160a6091f942e90d36a483e7e1dcf84acab38b0b829f3487f37c1463ebbbec"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/auto_curves.py",
+      "source_sha256": "5d8fb48c4e9b15099fcca82c0e32ad75269cd2c4e51d13253df7dda86973d05a"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/auto_extract.py",
+      "source_sha256": "37de84439944cfbdeec2b3202f7cb2b3b78576e83f085960c6c007a5764e6800"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/auto_multishape.py",
+      "source_sha256": "7466053ad0ee559241f0efc79338ae8d41ea6c78d524e8ff345c5625fc29156d"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/auto_panels.py",
+      "source_sha256": "98c1917812e1bc6399314d47f6fe585f73322dc1bae209922744ed6c34fae67d"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/auto_symbols.py",
+      "source_sha256": "a52fe25e86bf16bdba388575edfded330f5bd11e76fb5412b67aac02f25f0c29"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/auto_trace.py",
+      "source_sha256": "7acfe8f92c6b74cd4c6f2a7d560e0905e738885c6df91ab391eda51c2c12f902"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/axis_ocr.py",
+      "source_sha256": "8d7d0a2239375ccb234165acc72fcd7bf45ca45cc1e0ce78b64a589bbcfd56f6"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/chart_catalog.py",
+      "source_sha256": "22b1485b4de7d1ff54a1fdabbae2d62499eb283df5dc0a9227384f629ce26663"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/digitize.py",
+      "source_sha256": "eab67a35f9b8820217d9ae025728c9ccc8b8e526f6353d88f3eda6d4d7707ee0"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/native_ocr.py",
+      "source_sha256": "189324b18a023a2604ee9aceab18d922caa2ee9d13a4d25fe1274d0823fa2ee9"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/review_report.py",
+      "source_sha256": "ea55d3e0c51121f82cb1f3da59bd5c117d3e81066253c88ee38cf5223ccfa4a5"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/session.py",
+      "source_sha256": "79bbf695b56094d4935d733b8bab47278eb59c8b38cb7bb94a24701635553ce3"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/sources.py",
+      "source_sha256": "1059c695757521ac8ac4f8537f0fdfe84a36bc36bdee34b7ab8fa84c268940fb"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_auto_axes.py",
+      "source_sha256": "ce7790d4e57669d21f014137728f5b655a7a4a3228f47a6cc20d20b09669df30"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_auto_bars.py",
+      "source_sha256": "15bc9fd2413d2a128a2d24bb8686bfaba26841c031b0aea4914b8c1d511732c6"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_auto_curves.py",
+      "source_sha256": "1652a3964c98500701ce93aa9b5d94c508b8134575fa333f05e14515c441fe57"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_auto_extract.py",
+      "source_sha256": "404aefb38fa0df25317df5aa31d6de4629a93ee59998f37481ca4d87a59efc9b"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_auto_ui.py",
+      "source_sha256": "122a90de1f10b94519712a2e2530aa5ef359b28b9a5c0e341e2ac2cccbb5a8ce"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_axis_symbols.py",
+      "source_sha256": "2f33a1329ce0b63b135946a9c55fccf23b3d6b87ecfe93cf3696d288d4789c55"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_continuous_panels.py",
+      "source_sha256": "c5a442ce67b3a2971032c8f9a973ceff4ba4bb67d556b6e30728b854c23c13fc"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_export_ui.py",
+      "source_sha256": "955763d696dcf2071f3df18194d7a6819533cc98a1cfb9f17081f4348333826a"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_multishape.py",
+      "source_sha256": "62506738a21fc51ef289978eeab8358d189e37cedd42b87a289853a0d5dc1624"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/test_review_report.py",
+      "source_sha256": "8236e78aaaf3dee67776b33fd2dae953ce023a4c29360b9442fdf6d6546469ae"
+    },
+    {
+      "path": "catalyst_workbench/digitizer/windows_ocr.ps1",
+      "source_sha256": "dfe7259df8aa3d3acd4635d6a7e1610e2c305b2f8b69ebb1a11e1b561ec99855"
+    }
+  ]
+}

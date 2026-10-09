@@ -1,0 +1,66 @@
+{
+  "version": "2026.10.09",
+  "collected": 930,
+  "passed": 928,
+  "skipped": 2,
+  "hidden_gui_checks": 5,
+  "suites": [
+    {
+      "suite": "catalyst_workbench",
+      "tests": 601,
+      "skipped": 0,
+      "status": "passed"
+    },
+    {
+      "suite": "catalyst_workbench/gateway",
+      "tests": 124,
+      "skipped": 0,
+      "status": "passed"
+    },
+    {
+      "suite": "catalyst_workbench/digitizer",
+      "tests": 93,
+      "skipped": 1,
+      "status": "passed"
+    },
+    {
+      "suite": "tests",
+      "tests": 112,
+      "skipped": 1,
+      "status": "passed"
+    },
+    {
+      "suite": "hidden_gui_all",
+      "tests": 0,
+      "skipped": 0,
+      "status": "passed"
+    },
+    {
+      "suite": "hidden_gui_1",
+      "tests": 0,
+      "skipped": 0,
+      "status": "passed"
+    },
+    {
+      "suite": "hidden_gui_2",
+      "tests": 0,
+      "skipped": 0,
+      "status": "passed"
+    },
+    {
+      "suite": "hidden_gui_3",
+      "tests": 0,
+      "skipped": 0,
+      "status": "passed"
+    },
+    {
+      "suite": "hidden_gui_figures",
+      "tests": 0,
+      "skipped": 0,
+      "status": "passed"
+    }
+  ],
+  "accuracy_benchmark": false,
+  "new_ml_training": false,
+  "dft_validation": false
+}

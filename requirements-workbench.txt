@@ -1,0 +1,6 @@
+# Current three-stage desktop workbench. Python 3.10-3.12, Windows 10/11.
+numpy>=1.26,<3
+Pillow>=11,<13
+pypdf>=6,<7
+pypdfium2>=4.30,<6
+# tkinter is included in the official Windows Python installer.

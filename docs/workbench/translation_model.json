@@ -1,0 +1,30 @@
+{
+  "source": "https://argos-net.com/v1/translate-en_zh-1_9.argosmodel",
+  "index": "https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json",
+  "archive_sha256": "433e7c4f034d87fbe2353161e05f18646d7999452f801a4e1f0378522b9850ab",
+  "model_sha256": "1a039114d9456b6528fabb65b455b6f156319634a0f984b1f6018f7737d67598",
+  "tokenizer_sha256": "872224b85a11edc9d769a94949fd387b67ea85b50708db9f91f32f5b497a9af3",
+  "license": "Original OPUS model: CC-BY 4.0, as stated in packaged README.md",
+  "attribution": "Jörg Tiedemann and Santhosh Thottingal, OPUS-MT — Building open translation services for the World, EAMT 2020",
+  "components": [
+    {
+      "Name": "ctranslate2",
+      "Version": "4.8.2"
+    },
+    {
+      "Name": "numpy",
+      "Version": "2.5.3"
+    },
+    {
+      "Name": "PyYAML",
+      "Version": "6.0.3"
+    },
+    {
+      "Name": "sentencepiece",
+      "Version": "0.2.2"
+    }
+  ],
+  "local_processing": true,
+  "automatic_network_calls": false,
+  "implementation": "Project-owned CPU adapter; CTranslate2 with Argos model, sentencepiece; original scientific evidence unchanged."
+}
