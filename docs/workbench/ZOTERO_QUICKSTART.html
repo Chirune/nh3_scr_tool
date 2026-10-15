@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zotero 正文接收：操作步骤</title>
+<style>body{font:17px/1.8 "Microsoft YaHei",sans-serif;background:#f3f6fa;color:#233249;margin:0}main{max-width:880px;margin:30px auto;padding:28px;background:white;border-radius:14px}h1{font-size:28px}h2{font-size:21px;margin-top:28px}li{margin:12px 0}a{color:#1761b2}.note{padding:14px 20px;background:#edf4fc;border-radius:8px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #d6dfeb;padding:10px;text-align:left}</style>
+<main><h1>Zotero → 本工具 → 论文数据提取</h1>
+<p class="note">这是一条不依赖 Elsevier API 的正文接收路径。你在浏览器取得阅读权限，用 Zotero Connector 保存正文，本工具读取本机 PDF。Zotero 不会赋予你没有的订阅权限。</p>
+<h2>第一次准备</h2><ol>
+<li>从 <a href="https://www.zotero.org/download/">Zotero 官方下载页</a>安装桌面版和 Chrome / Edge 的 Zotero Connector。两者都需要。</li>
+<li>打开 Zotero 桌面版，在“设置 → 高级”中勾选“允许此计算机上的其他应用程序与 Zotero 通信”。不同版本的设置名称可能略有变化。</li>
+<li>打开本工具的板块1，点击顶部“学校全文 / Zotero 接收”，再点“检测 Zotero 连接”。不需要 Zotero 云端 API Key，也不需要把学校密码填进本工具。</li></ol>
+<h2>先用一篇论文测试</h2><ol>
+<li>在板块1导入或检索一篇 DOI 已明确的论文，核对摘要后判定“保留”。</li>
+<li>点击“打开选中论文网页”，通过你有权限的网络或学校登录打开全文。</li>
+<li>点击浏览器 Zotero Connector 图标，保存到“我的文库”。在 Zotero 中展开条目，确认有正文 PDF，且能打开。只有网页快照或只有题录不够。</li>
+<li>回到本工具，点“接收保留论文的 PDF”。程序按 DOI 匹配条目，检查文件结构、DOI与题名；通过后复制到本次运行目录。</li>
+<li>显示“Zotero 已接收”后，点“进入第二板块（已接收的 PDF）”，读取文字、表格和数值；图中数据仍需按当前曲线工具流程核对。</li></ol>
+<h2>之后怎样批量推进</h2><p>筛选一批论文并判定“保留” → 点“导出保留论文清单（RIS）” → 在 Zotero 用“文件 → 导入”导入清单。RIS 只包含已知题录与可用摘要，不包含 PDF。</p>
+<p>可在 Zotero 选择条目，尝试其“查找可用 PDF”功能；未取得的论文逐篇打开有权限的网页，用 Connector 保存。成功率取决于文章与访问权限。保持本工具的接收窗口打开，可勾选“自动接收”，每 8 秒检查当前保留论文已下载的附件；这个检查不会自动访问出版社。</p>
+<h2>看到这些提示时怎么办</h2><table>
+<tr><th>提示</th><th>你需要做什么</th></tr>
+<tr><td>尚未连接 Zotero</td><td>安装并打开桌面版，允许本机应用通信，再检测。</td></tr>
+<tr><td>等待 Zotero 保存</td><td>保存到“我的文库”；确认 Zotero 条目 DOI 与板块1一致。</td></tr>
+<tr><td>Zotero 只有条目 / 附件未在本机</td><td>保存正文 PDF，或先在 Zotero 中打开云端附件，使它下载到本机。</td></tr>
+<tr><td>PDF 身份待核对 / 多个 PDF 待核对</td><td>检查是不是正文、是不是这篇论文，以及是否存在多个正文版本；程序不猜测版本。</td></tr>
+<tr><td>仅有补充材料</td><td>另存正文 PDF；补充材料暂不作为正文自动接收。</td></tr></table>
+<p>PDF 接收成功表示取得可读取的原文，不表示催化剂数据已经全部提取或审核。机器学习数据仍须核对样品、实验条件、性能指标和来源。</p>
+<p>官方说明：<a href="https://www.zotero.org/support/connector">Zotero Connector</a> · <a href="https://www.zotero.org/support/adding_items_to_zotero">保存论文与 PDF</a></p>
+</main></html>

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import hashlib
 import html
 import json
+import os
 from pathlib import Path
 import re
 import time
@@ -16,10 +17,10 @@ from urllib.request import Request, urlopen
 import uuid
 import xml.etree.ElementTree as ET
 
-from adapters import search_crossref, search_europe_pmc, lookup_doi
+from adapters import search_crossref, search_europe_pmc, search_openalex, search_core, search_semantic_scholar, lookup_doi, lookup_openalex_doi, AdapterError, _openalex_key, provider_key
 from rules import PROFILE_INFO, screen_record
 
-VERSION = '0.2.0'
+VERSION = '0.4.0'
 DECISIONS = {'target': '保留候选', 'review': '待复核', 'non_target': '暂不相关'}
 DOI_RE = re.compile(r'10\.\d{4,9}/[^\s<>"\x00-\x1f]+', re.I)
 
@@ -68,6 +69,15 @@ def source_route(record):
         for label, domains, names in mapping:
             if any(n in publisher for n in names):
                 group, identified_by = label, '出版方元数据（未验证最终跳转）'
+                break
+    if group=='其他 / 未识别':
+        doi=canonical_doi(record.get('doi'))
+        prefixes={'10.1016/':'Elsevier','10.1006/':'Elsevier','10.1021/':'ACS','10.1039/':'RSC',
+                  '10.1007/':'Springer Nature','10.1038/':'Springer Nature','10.1186/':'Springer Nature',
+                  '10.1002/':'Wiley','10.1111/':'Wiley','10.3390/':'MDPI','10.1080/':'Taylor & Francis'}
+        for prefix,label in prefixes.items():
+            if doi.startswith(prefix):
+                group,identified_by=label,'DOI前缀推断（需核对当前平台）'
                 break
     open_pmc = any(is_open_pmc_candidate(c) for c in candidates)
     if open_pmc:
@@ -133,6 +143,7 @@ def merge_records(raw_records):
     merged = {}
     for source in raw_records:
         original = copy.deepcopy(source)
+        _abstract_metadata(original)
         key = _record_key(original)
         original['doi'] = canonical_doi(original.get('doi'))
         if key not in merged:
@@ -149,33 +160,64 @@ def merge_records(raw_records):
                 if value not in values:
                     values.append(value)
         record.setdefault('source_ids', {}).update(original.get('source_ids') or {})
-        for field in ('title', 'abstract', 'publisher', 'journal', 'url', 'year', 'document_type'):
+        for field in ('title', 'publisher', 'journal', 'url', 'year', 'document_type'):
             if not record.get(field) and original.get(field):
                 record[field] = original[field]
         # Keep one source's abstract intact. Never concatenate unrelated snippets as if one abstract.
         if len(original.get('abstract') or '') > len(record.get('abstract') or ''):
             record['abstract'] = original['abstract']
+            record['abstract_origin'] = original.get('abstract_origin','')
+            record['abstract_source'] = copy.deepcopy(original.get('abstract_source',{}))
+        if record.get('metadata_lookup_failed') and original.get('title') and not original.get('metadata_lookup_failed'):
+            record['title']=original['title'];record.pop('metadata_lookup_failed',None)
+        _abstract_metadata(record)
     return list(merged.values())
 
 
-def _screen(run, raw_records):
+def _abstract_metadata(record):
+    text=str(record.get('abstract') or '').strip()
+    if text.lower() in {'no abstract available','abstract unavailable','n/a','none','null','无摘要'}:
+        text='';record['abstract']=''
+    local=bool(record.get('extraction_status'))
+    record['abstract_status']='local_excerpt' if text and local else 'available' if text else 'missing'
+    if text:
+        if not record.get('abstract_origin'):
+            record['abstract_origin']='本地PDF提取片段' if local else ' / '.join(record.get('sources',[]))+'摘要'
+        if not isinstance(record.get('abstract_source'),dict) or not record['abstract_source']:
+            record['abstract_source']={'provider':' / '.join(record.get('sources',[])),
+                                       'source_id':record.get('doi',''),'source_url':record.get('url','')}
+        record['abstract_source'].setdefault('retrieved_at',record.get('retrieved_at') or now())
+        record['warnings']=[w for w in record.get('warnings',[]) if not str(w).startswith(('来源未提供摘要','来源未提供有效摘要','DOI 元数据未取得'))]
+    return record
+
+
+def _classify_record(record, profile):
     from difflib import SequenceMatcher
+    _abstract_metadata(record)
+    record['screening'] = screen_record(record, profile)
+    if str(record.get('document_type', '')).lower() in {'component', 'dataset'}:
+        record['screening']['decision'] = 'review'
+        record['screening']['reason'] += '；此记录可能是补充材料或数据集，需关联主论文后使用。'
+    titles = [re.sub(r'\W+', '', r.get('title', '').lower()) for r in record.get('source_records',[]) if r.get('title') and not r.get('metadata_lookup_failed')]
+    if titles and any(SequenceMatcher(None, titles[0], t).ratio() < .60 for t in titles[1:]):
+        record['screening']['decision'] = 'review'
+        record['screening']['reason'] += '；同 DOI 的来源题名存在明显差异，需核对身份。'
+        if '多来源题名差异，已转人工复核' not in record.setdefault('warnings',[]):
+            record['warnings'].append('多来源题名差异，已转人工复核')
+    if record.get('extraction_status') in ('failed', 'empty'):
+        record['screening']['decision'] = 'review'
+        record['screening']['reason'] = 'PDF 文字提取失败或为空；可能是扫描版，不能据此排除。'
+    elif record['abstract_status']=='missing':
+        record['screening']['decision']='review'
+        record['screening']['reason'] += '；尚无有效摘要，保留待复核，不由标题直接放行或排除。'
+    record['effective_decision'] = record.get('manual_decision') or record['screening']['decision']
+    record['route'] = source_route(record)
+
+
+def _screen(run, raw_records):
     records = merge_records(raw_records)
     for record in records:
-        record['screening'] = screen_record(record, run['profile'])
-        if str(record.get('document_type', '')).lower() in {'component', 'dataset'}:
-            record['screening']['decision'] = 'review'
-            record['screening']['reason'] += '；此记录可能是补充材料或数据集，需关联主论文后使用，不能直接当作一篇独立研究。'
-        titles = [re.sub(r'\W+', '', r.get('title', '').lower()) for r in record['source_records'] if r.get('title')]
-        if titles and any(SequenceMatcher(None, titles[0], t).ratio() < .60 for t in titles[1:]):
-            record['screening']['decision'] = 'review'
-            record['screening']['reason'] += '；同 DOI 的来源题名存在明显差异，需核对身份。'
-            record.setdefault('warnings', []).append('多来源题名差异，已转人工复核')
-        if record.get('extraction_status') in ('failed', 'empty'):
-            record['screening']['decision'] = 'review'
-            record['screening']['reason'] = 'PDF 文字提取失败或为空；可能是扫描版，不能据此排除。'
-        record['effective_decision'] = record['screening']['decision']
-        record['route'] = source_route(record)
+        _classify_record(record,run['profile'])
     records.sort(key=lambda r: ({'target': 0, 'review': 1, 'non_target': 2}.get(r['effective_decision'], 3),
                                not r['screening'].get('priority_focus', False),
                                -float(r['screening'].get('coverage', 0)), str(r.get('title', ''))))
@@ -198,6 +240,8 @@ def _save(run):
     root.mkdir(parents=True, exist_ok=True)
     counts = {d: sum(r.get('effective_decision') == d for r in run['records']) for d in DECISIONS}
     run['summary'].update(total=len(run['records']), **counts)
+    run['summary']['with_abstract']=sum(r.get('abstract_status')=='available' for r in run['records'])
+    run['summary']['missing_abstract']=sum(r.get('abstract_status')=='missing' for r in run['records'])
     run['updated_at'] = now()
     tmp = root / 'run.json.tmp'
     tmp.write_text(json.dumps(run, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -205,14 +249,17 @@ def _save(run):
     fields = ['id', 'decision', 'decision_zh', 'auto_decision', 'manual_decision', 'manual_note',
               'title', 'doi', 'year', 'journal', 'publisher', 'sources', 'publisher_group',
               'topic_branch', 'priority_focus', 'group_coverage_not_confidence', 'reason',
-              'matched_groups', 'missing_groups', 'abstract', 'url', 'access_hint',
-              'fulltext_candidates', 'local_path', 'pdf_status', 'pdf_source', 'pdf_message', 'warnings']
+              'matched_groups', 'missing_groups', 'abstract', 'abstract_status','abstract_origin','abstract_source','url', 'access_hint',
+              'fulltext_candidates', 'local_path', 'local_xml', 'xml_sha256', 'xml_source', 'xml_message',
+              'pdf_status', 'pdf_source', 'pdf_message', 'warnings']
     with (root / 'screening_results.csv').open('w', encoding='utf-8-sig', newline='') as f:
         writer = csv.DictWriter(f, fields)
         writer.writeheader()
         for record in run['records']:
             s, route = record['screening'], record['route']
             row = {k: record.get(k, '') for k in fields}
+            row.update(xml_source=record.get('xml_acquisition',{}).get('source_url',''),
+                       xml_message=record.get('xml_acquisition',{}).get('message',''))
             row.update(decision=record['effective_decision'], decision_zh=DECISIONS[record['effective_decision']],
                        auto_decision=s['decision'], sources='; '.join(record.get('sources', [])),
                        publisher_group=route['publisher_group'], access_hint=route['access_hint'],
@@ -222,6 +269,7 @@ def _save(run):
                        missing_groups='; '.join(s.get('missing_groups', [])),
                        fulltext_candidates=json.dumps(record.get('fulltext_candidates', []), ensure_ascii=False),
                        warnings='; '.join(record.get('warnings', [])))
+            row['abstract_source']=json.dumps(record.get('abstract_source',{}),ensure_ascii=False)
             acquisition=record.get('pdf_acquisition',{})
             row.update(pdf_status=acquisition.get('status',''),pdf_source=acquisition.get('source_url',''),pdf_message=acquisition.get('message',''))
             writer.writerow({k: _csv_safe(v) for k, v in row.items()})
@@ -243,6 +291,7 @@ def _write_html(run):
                      f'<h2>{e(r.get("title"))}</h2><p>DOI：{e(r.get("doi") or "未提供 / 待确认")} ｜ 来源：{e(", ".join(r.get("sources", [])))}</p>'
                      f'<p>{e(s.get("reason"))}</p><p>{e(r["route"]["publisher_group"])}：{e(r["route"]["access_hint"])} {link}</p>'
                      f'<p>PDF 获取：{e(r.get("pdf_acquisition",{}).get("message","保留后可在软件中自动获取"))}</p>'
+                     f'<p>摘要状态：{e(r.get("abstract_status"))} ｜ 摘要来源：{e(r.get("abstract_origin") or "未取得")}</p>'
                      f'<details><summary>查看摘要、关键词与人工复核</summary><p>{e(r.get("abstract") or "缺少摘要，需看原文")}</p>'
                      f'<p>关键词组：{e(json.dumps(s.get("matched_groups", {}), ensure_ascii=False))}</p>'
                      f'<p>人工判断：{e(r.get("manual_decision"))}　{e(r.get("manual_note"))}</p></details></article>')
@@ -258,7 +307,50 @@ def _write_html(run):
     (Path(run['run_dir']) / '筛选结果_可直接打开.html').write_text(document, encoding='utf-8')
 
 
-def run_search(profile, queries=None, limit=15, providers=('Crossref', 'Europe PMC'), output_root=None, progress=None, cancel_event=None):
+def _enrich_missing_abstracts(run, raw, cache_root, api_key='', enabled=True, progress=None, cancel_event=None, maximum=50,recheck_openalex=False,blocked_status=None):
+    if not enabled:return []
+    candidates=[r for r in merge_records(raw) if r.get('abstract_status')=='missing' and r.get('doi')
+                and not r.get('extraction_status') and (recheck_openalex or not r.get('source_ids',{}).get('OpenAlex'))]
+    cache_root=Path(cache_root);cache_root.mkdir(parents=True,exist_ok=True)
+    additions=[]
+    run['abstract_enrichment']={'enabled':True,'maximum':maximum,'eligible':len(candidates),'attempted':0,'filled':0,
+                               'deferred_by_limit':max(0,len(candidates)-maximum)}
+    if blocked_status:
+        run['abstract_enrichment']['stopped_reason']=f'本批OpenAlex已返回HTTP {blocked_status}，未再次请求补全；其他来源结果保留'
+        return []
+    for index,record in enumerate(candidates[:maximum],1):
+        if _cancelled(cancel_event):
+            run['errors'].append('用户停止摘要补全；保留已取得的信息。');break
+        doi=record['doi'];started=now()
+        _emit(progress,f'OpenAlex补摘要 {index}/{min(len(candidates),maximum)}：{doi}')
+        run['abstract_enrichment']['attempted']+=1
+        try:
+            cache=cache_root/(hashlib.sha256(('openalex-doi:'+VERSION+':'+doi).encode()).hexdigest()+'.json')
+            cached=cache.exists() and time.time()-cache.stat().st_mtime<86400
+            enriched=json.loads(cache.read_text(encoding='utf-8')) if cached else lookup_openalex_doi(doi,timeout=15,api_key=api_key)
+            if canonical_doi(enriched.get('doi'))!=doi:raise AdapterError('补全响应DOI不一致，未合并摘要。')
+            enriched['retrieved_at']=started
+            _abstract_metadata(enriched)
+            if not cached:cache.write_text(json.dumps(enriched,ensure_ascii=False),encoding='utf-8')
+            additions.append(enriched)
+            filled=enriched['abstract_status']=='available'
+            run['abstract_enrichment']['filled']+=int(filled)
+            run['requests'].append({'provider':'OpenAlex','operation':'abstract_enrichment','doi':doi,
+                'status':'filled' if filled else 'abstract_missing','started_at':started,'cached_24h':cached})
+        except Exception as exc:
+            run['errors'].append(f'OpenAlex补摘要未完成（{doi}）：{exc}')
+            run['requests'].append({'provider':'OpenAlex','operation':'abstract_enrichment','doi':doi,'status':'error',
+                'error':str(exc),'http_status':getattr(exc,'http_status',None),'started_at':started})
+            if getattr(exc,'http_status',None) in (401,403,429):
+                run['abstract_enrichment']['stopped_reason']='授权或额度限制，未继续请求剩余DOI'
+                break
+    return additions
+
+
+def run_search(profile, queries=None, limit=15, providers=('Crossref', 'Europe PMC'), output_root=None, progress=None, cancel_event=None,
+               enrich_abstracts=True, openalex_api_key='',search_api_keys=None):
+    openalex_api_key=_openalex_key(openalex_api_key)
+    search_api_keys={p:provider_key(v,p) for p,v in (search_api_keys or {}).items() if p in ('CORE','Semantic Scholar')}
     run = _new_run(profile, output_root, 'search')
     if isinstance(queries, str):
         queries = queries.splitlines()
@@ -268,12 +360,14 @@ def run_search(profile, queries=None, limit=15, providers=('Crossref', 'Europe P
     limit = int(limit)
     if not 1 <= limit <= 100:
         raise ValueError('每个检索词、每个来源的候选上限应为 1–100。')
-    functions = {'Crossref': search_crossref, 'Europe PMC': search_europe_pmc}
+    functions = {'Crossref': search_crossref, 'Europe PMC': search_europe_pmc,'OpenAlex':search_openalex,
+                 'CORE':search_core,'Semantic Scholar':search_semantic_scholar}
     providers = list(providers)
     if not providers or any(p not in functions for p in providers):
         raise ValueError('至少选择一个有效文献来源。')
     run.update(queries=queries, providers=providers, per_query_per_source_limit=limit)
     raw = []
+    blocked_providers={}
     cache_root = Path(run['run_dir']).parent / '_cache'
     cache_root.mkdir(exist_ok=True)
     for query in queries:
@@ -290,7 +384,14 @@ def run_search(profile, queries=None, limit=15, providers=('Crossref', 'Europe P
                 if cached:
                     records = json.loads(cache.read_text(encoding='utf-8'))
                 else:
-                    records = functions[provider](query, limit=limit, timeout=15)
+                    if provider in blocked_providers:
+                        run['requests'].append({'provider':provider,'query':query,'status':'deferred',
+                            'http_status':blocked_providers[provider],'reason':'本批来源已受授权/额度限制，未重复请求'})
+                        continue
+                    options={'limit':limit,'timeout':15}
+                    if provider=='OpenAlex':options['api_key']=openalex_api_key
+                    elif provider in search_api_keys:options['api_key']=search_api_keys[provider]
+                    records = functions[provider](query, **options)
                     cache.write_text(json.dumps(records, ensure_ascii=False), encoding='utf-8')
                 for record in records:
                     record['retrieval_query'] = query
@@ -301,13 +402,18 @@ def run_search(profile, queries=None, limit=15, providers=('Crossref', 'Europe P
             except Exception as exc:
                 message = f'{provider} 检索失败：{type(exc).__name__}: {exc}'
                 run['errors'].append(message)
-                run['requests'].append({'provider': provider, 'query': query, 'started_at': started, 'status': 'error', 'error': str(exc)})
+                status=getattr(exc,'http_status',None)
+                run['requests'].append({'provider': provider, 'query': query, 'started_at': started, 'status': 'error', 'error': str(exc),'http_status':status})
+                if provider in ('OpenAlex','CORE','Semantic Scholar') and status in (401,403,429):blocked_providers[provider]=status
                 _emit(progress, message)
+    raw.extend(_enrich_missing_abstracts(run,raw,cache_root,openalex_api_key,enrich_abstracts,progress,cancel_event,
+                                       blocked_status=blocked_providers.get('OpenAlex')))
     _emit(progress, '正在按 DOI 去重、筛选并保存结果……')
     return _screen(run, raw)
 
 
-def run_dois(profile, text, output_root=None, progress=None, cancel_event=None):
+def run_dois(profile, text, output_root=None, progress=None, cancel_event=None,enrich_abstracts=True,openalex_api_key=''):
+    openalex_api_key=_openalex_key(openalex_api_key)
     dois = list(dict.fromkeys(canonical_doi(d) for d in DOI_RE.findall(unquote(text))))
     dois = [d for d in dois if d]
     if not dois:
@@ -331,8 +437,42 @@ def run_dois(profile, text, output_root=None, progress=None, cancel_event=None):
             run['errors'].append(f'{doi}：{exc}（查询失败，不代表论文不相关）')
             raw.append({'doi': doi, 'title': 'DOI 查询未完成：' + doi, 'abstract': '',
                         'url': 'https://doi.org/' + doi, 'sources': ['用户 DOI'],
-                        'source_ids': {}, 'warnings': ['DOI 元数据未取得'], 'fulltext_candidates': []})
+                        'source_ids': {}, 'warnings': ['DOI 元数据未取得'], 'fulltext_candidates': [],'metadata_lookup_failed':True})
+    raw.extend(_enrich_missing_abstracts(run,raw,Path(run['run_dir']).parent/'_cache',openalex_api_key,
+                                       enrich_abstracts,progress,cancel_event))
     return _screen(run, raw)
+
+
+def enrich_existing_run(run,openalex_api_key='',progress=None,cancel_event=None):
+    """Update metadata only. IDs, decisions and local fulltext links are retained."""
+    updated=copy.deepcopy(run)
+    openalex_api_key=_openalex_key(openalex_api_key)
+    additions=_enrich_missing_abstracts(updated,updated['records'],Path(updated['run_dir']).parent/'_cache',
+                                       openalex_api_key,True,progress,cancel_event,recheck_openalex=True)
+    changed=[]
+    for addition in additions:
+        record=next((r for r in updated['records'] if canonical_doi(r.get('doi'))==addition['doi'] and not r.get('extraction_status')),None)
+        if not record:continue
+        seed=copy.deepcopy(record)
+        # A downloaded PDF hash identifies a file, not a new metadata DOI.
+        # Remove it only from this temporary metadata merge, never the record.
+        seed.pop('local_sha256',None)
+        selected=merge_records([seed,addition])[0]
+        # Copy only metadata, not identity, file links, review fields or audit.
+        fields=('title','abstract','publisher','journal','url','year','document_type','sources','source_ids',
+                'warnings','fulltext_candidates','abstract_origin','abstract_source','abstract_status')
+        for field in fields:
+            if field in selected:record[field]=copy.deepcopy(selected[field])
+        record.setdefault('source_records',[]).append(copy.deepcopy(addition))
+        if addition.get('title'):record.pop('metadata_lookup_failed',None)
+        _classify_record(record,updated['profile'])
+        changed.append(record['id'])
+    for record in updated['records']:
+        _classify_record(record,updated['profile'])
+    updated.setdefault('metadata_history',[]).append({'at':now(),'operation':'openalex_abstract_enrichment','record_ids':changed,
+                                                   'manual_reviews_preserved':True})
+    _save(updated)
+    return updated
 
 
 def run_local_pdfs(profile, folder, output_root=None, progress=None, cancel_event=None):
@@ -412,6 +552,7 @@ def load_run(path):
     if not isinstance(value, dict) or not isinstance(value.get('records'), list) or value.get('profile') not in PROFILE_INFO:
         raise ValueError('这不是本工具保存的 run.json 结果文件。')
     value['run_dir'] = str(file.resolve().parent)
+    for record in value['records']:_abstract_metadata(record)
     return value
 
 
@@ -465,7 +606,7 @@ def acquire_pdfs(run, progress=None, cancel_event=None, publisher_client=None):
                             **({'publisher_client':publisher_client} if publisher_client is not None else {}))
 
 
-def check_publisher_pdf(run,record_id,client,progress=None,cancel_event=None):
+def check_publisher_pdf(run,record_id,client,progress=None,cancel_event=None,*,format='pdf'):
     """Explicit single-paper API check; never replace an existing PDF on failure."""
     from pdf_fetch import FetchError, Stopped, now
     from elsevier_api import APIError
@@ -473,13 +614,19 @@ def check_publisher_pdf(run,record_id,client,progress=None,cancel_event=None):
     if (record.get('manual_decision') or record.get('effective_decision'))!='target':
         raise ValueError('请先将当前论文判定为保留，再进行 API 全文验证。')
     try:
-        info=client.fetch_pdf(dict(record),run['run_dir'],cancel_event,progress)
+        fetch=client.fetch_xml if format=='xml' else client.fetch_pdf
+        info=fetch(dict(record),run['run_dir'],cancel_event,progress)
     except Stopped:info={'status':'cancelled','message':'已停止本次 API 验证。'}
     except FetchError as exc:
         info=exc.public_details() if isinstance(exc,APIError) else {'status':exc.status,'message':str(exc)}
     info={**info,'checked_at':now()}
     record['publisher_api_check']={key:value for key,value in info.items() if key!='attempts'}
-    if info['status']=='downloaded':
+    if info['status']=='downloaded_xml':
+        previous=record.get('xml_acquisition')
+        if previous:record.setdefault('xml_acquisition_history',[]).append(previous)
+        record.update(local_xml=info['local_xml'],xml_sha256=info['xml_sha256'],xml_acquisition=info)
+        if not record.get('local_path'):record['pdf_acquisition']=info
+    elif info['status']=='downloaded':
         previous=record.get('pdf_acquisition')
         if previous:record.setdefault('pdf_acquisition_history',[]).append(previous)
         record['pdf_acquisition']=info
@@ -501,8 +648,13 @@ def main():
     parser.add_argument('--query', action='append')
     parser.add_argument('--limit', type=int, default=5)
     parser.add_argument('--output-root')
+    parser.add_argument('--provider',action='append',choices=['Crossref','Europe PMC','OpenAlex','CORE','Semantic Scholar'])
+    parser.add_argument('--no-enrich-abstracts',action='store_true')
     args = parser.parse_args()
-    result = run_search(args.profile, args.query, args.limit, output_root=args.output_root, progress=print)
+    result = run_search(args.profile, args.query, args.limit, output_root=args.output_root, progress=print,
+                        providers=args.provider or ['Crossref','OpenAlex','Europe PMC','CORE','Semantic Scholar'],enrich_abstracts=not args.no_enrich_abstracts,
+                        openalex_api_key=os.environ.get('OPENALEX_API_KEY',''),
+                        search_api_keys={'CORE':os.environ.get('CORE_API_KEY',''),'Semantic Scholar':os.environ.get('SEMANTIC_SCHOLAR_API_KEY','')})
     print(json.dumps({'run_dir': result['run_dir'], 'summary': result['summary'], 'errors': result['errors']}, ensure_ascii=False))
 
 

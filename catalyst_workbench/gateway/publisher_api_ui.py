@@ -5,7 +5,7 @@ from tkinter import messagebox, ttk
 import webbrowser
 
 import engine
-from elsevier_api import REGISTER_URL, AUTH_URL
+from elsevier_api import REGISTER_URL, AUTH_URL, TEXT_MINING_DOCS
 from elsevier_api import APIError
 from pdf_fetch import Stopped
 from publisher_clients import (FACTORIES, PublisherClients, provider_for, same_credentials,
@@ -13,15 +13,15 @@ from publisher_clients import (FACTORIES, PublisherClients, provider_for, same_c
 
 
 PROVIDERS = {
-    'springer': {'label': 'Springer Nature：开放获取', 'field': 'Springer API Key',
+    'springer': {'label': 'Springer Nature：开放获取', 'field': 'Open Access API Key',
         'register': SPRINGER_REGISTER, 'docs': SPRINGER_DOCS,
-        'note': '先申请 Open Access API。程序按 DOI 查询开放论文，再接收其公开 PDF；此入口不解锁订阅文章。'},
+        'note': 'Open Access 与 Meta 分别填写各自 Key；Meta 用于补查题录和开放状态。程序查询开放论文并接收公开 PDF，Full Text/TDM 需另行开通。'},
     'wiley': {'label': 'Wiley：TDM 全文 PDF', 'field': 'Wiley TDM Token',
         'register': WILEY_REGISTER, 'docs': WILEY_DOCS,
-        'note': '需 Wiley TDM Token；订阅全文还需机构 IP 权限。浏览器学校登录不会自动传给程序，连续请求约每 10 秒一篇。'},
-    'elsevier': {'label': 'Elsevier：全文 PDF', 'field': 'Elsevier API Key',
-        'register': REGISTER_URL, 'docs': AUTH_URL,
-        'note': '使用 Elsevier 官方全文 API。学校网页登录状态不会自动传给程序；机构 Token 仅在官方提供后填写。'},
+        'note': '需 Wiley TDM Token；默认直连，订阅全文还需机构 IP 权限。浏览器学校登录不会自动传给程序，连续请求约每 10 秒一篇。'},
+    'elsevier': {'label': 'Elsevier：全文 PDF / XML', 'field': 'Elsevier API Key',
+        'register': REGISTER_URL, 'docs': TEXT_MINING_DOCS,
+        'note': '使用 Elsevier 官方 TDM 接口接收 XML 或 PDF 全文。学校网页登录状态不会自动传给程序；机构 Token 仅在官方提供后填写。'},
 }
 
 
@@ -40,10 +40,11 @@ class PublisherAPIWindow:
         self.token = tk.StringVar()
         self.selected = tk.StringVar()
         self.state = tk.StringVar()
+        self.xml_first = tk.BooleanVar(value=True)
         self.provider = tk.StringVar(value=PROVIDERS[self.provider_id]['label'])
         self.note = tk.StringVar()
         self.field = tk.StringVar()
-        header = ttk.Frame(self.window, padding=(18, 10))
+        header = ttk.Frame(self.window, padding=(18, 5))
         header.pack(fill='x')
         ttk.Label(header, text='选择出版社，先验证一篇', font=('Microsoft YaHei UI', 16, 'bold')).pack(anchor='w')
         choice = ttk.Frame(header)
@@ -59,7 +60,7 @@ class PublisherAPIWindow:
         ttk.Button(links, text='① 打开该出版社申请入口', command=lambda: self.open_link('register')).pack(side='left')
         ttk.Button(links, text='查看该接口说明', command=lambda: self.open_link('docs')).pack(side='left', padx=8)
         ttk.Button(links, text='ACS / RSC 等接入方式', command=self.help).pack(side='left')
-        form = ttk.LabelFrame(self.window, text='② 在这台电脑填写', padding=10)
+        form = ttk.LabelFrame(self.window, text='② 在这台电脑填写', padding=6)
         form.pack(fill='x', padx=18)
         form.columnconfigure(1, weight=1)
         ttk.Label(form, textvariable=self.field).grid(row=0, column=0, sticky='w', padx=(0, 10), pady=4)
@@ -78,26 +79,28 @@ class PublisherAPIWindow:
         self.disable_button.pack(side='left', padx=8)
         self.probe_button = ttk.Button(controls, text='检查 Key / 通道', command=self.check_access)
         ttk.Label(form, textvariable=self.state, wraplength=770).grid(row=4, column=0, columnspan=2, sticky='w', pady=(5, 0))
-        check = ttk.LabelFrame(self.window, text='③ 验证板块1当前选中的论文', padding=10)
-        check.pack(fill='x', padx=18, pady=8)
+        check = ttk.LabelFrame(self.window, text='③ 验证板块1当前选中的论文', padding=6)
+        check.pack(fill='x', padx=18, pady=4)
         ttk.Label(check, textvariable=self.selected, wraplength=780).pack(anchor='w')
         actions = ttk.Frame(check)
         actions.pack(fill='x', pady=(7, 0))
         self.test_button = ttk.Button(actions, text='验证并接收这篇 PDF', command=self.test_selected)
         self.test_button.pack(side='left')
+        self.xml_test_button = ttk.Button(actions, text='获取 XML 正文', command=lambda: self.test_selected(format='xml'))
+        self.xml_test_button.pack(side='left',padx=6)
+        self.xml_first_button = ttk.Checkbutton(check,text='批量获取时优先 XML；未取得时尝试 PDF',variable=self.xml_first,command=self.apply)
         ttk.Button(actions, text='刷新当前论文', command=self.refresh).pack(side='left', padx=8)
         self.article_button = ttk.Button(actions, text='打开论文网页', command=self.owner._open_article)
         self.article_button.pack(side='left')
-        ttk.Label(check, text='在板块1选中对应出版社的论文并判定“保留”；验证会实际请求该接口。',
-                  wraplength=780).pack(anchor='w', pady=(5, 0))
         footer = ttk.Frame(self.window, padding=(18, 4, 18, 10))
         footer.pack(side='bottom', fill='x')
-        ttk.Label(footer, text='成功后回到板块1，点击“自动获取 PDF → 进入第二板块”，程序按出版社选择已启用的通道。',
+        ttk.Label(footer, text='获取成功后，回到“获取正文：API / 浏览器”进入第二板块。',
                   wraplength=780).pack(anchor='w')
         footer_actions = ttk.Frame(footer); footer_actions.pack(anchor='w', pady=(5, 0))
         ttk.Button(footer_actions, text='查看本机多出版社操作说明', command=self.help).pack(side='left')
-        self.school_button = ttk.Button(footer_actions, text='学校全文 / Zotero 接收', command=self.open_school)
+        self.school_button = ttk.Button(footer_actions, text='改用浏览器 / Zotero', command=self.open_school)
         self.school_button.pack(side='left', padx=8)
+        footer.pack_configure(before=header)
         panel = ttk.Frame(self.window, padding=(18, 0))
         panel.pack(fill='both', expand=True)
         self.result = tk.Text(panel, height=5, wrap='word', font=('Microsoft YaHei UI', 10), state='disabled', padx=8, pady=8)
@@ -107,7 +110,7 @@ class PublisherAPIWindow:
         scroll.pack(side='right', fill='y')
         self.update_provider_fields()
         self.refresh()
-        self.show('选择出版社后申请并填写对应凭据，再选择一篇保留论文进行验证。\n\nSpringer：先验证开放论文；Wiley：TDM Token + 机构 IP 权限。\n只有实际取得且身份核对通过的 PDF 才会交给板块2。')
+        self.show('选择出版社后申请并填写对应凭据，再选择一篇保留论文进行验证。\n\nSpringer：先验证开放论文；Wiley：TDM Token + 机构 IP 权限；Elsevier：可接收 XML 正文。\n只有实际取得且身份核对通过的正文才会交给板块2。')
 
     def registry(self):
         return PublisherClients(getattr(self.owner, 'publisher_client', None))
@@ -116,12 +119,18 @@ class PublisherAPIWindow:
         settings = PROVIDERS[self.provider_id]
         self.note.set(settings['note'])
         self.field.set(settings['field'])
+        self.token_label.configure(text='Meta API Key（可选，单独申请）' if self.provider_id == 'springer' else '机构 Token（有才填）')
+        if self.provider_id=='elsevier':
+            self.xml_test_button.pack(side='left',padx=6)
+            self.xml_first_button.pack(anchor='w',pady=4)
+        else:
+            self.xml_test_button.pack_forget();self.xml_first_button.pack_forget()
         if self.provider_id == 'springer':
             self.probe_button.pack(side='left')
         else:
             self.probe_button.pack_forget()
         for widget in (self.token_label, self.token_entry):
-            if self.provider_id == 'elsevier':
+            if self.provider_id in ('elsevier', 'springer'):
                 widget.grid()
             else:
                 widget.grid_remove()
@@ -173,21 +182,25 @@ class PublisherAPIWindow:
         self.article_button.configure(state='normal' if record and not busy else 'disabled')
         self.school_button.configure(state='disabled' if busy else 'normal')
         self.test_button.configure(state='normal' if not busy and record and provider_for(record) == self.provider_id else 'disabled')
+        self.xml_test_button.configure(state='normal' if not busy and record and self.provider_id=='elsevier' and provider_for(record)=='elsevier' else 'disabled')
+        self.xml_first_button.configure(state='disabled' if busy else 'normal')
 
     def apply(self):
         if self.owner.busy:
             return False
         key = self.key.get()
-        token = self.token.get() if self.provider_id == 'elsevier' else ''
+        token = self.token.get() if self.provider_id in ('elsevier', 'springer') else ''
         registry = self.registry()
         existing = registry.clients.get(self.provider_id)
         # Repeated validation must retain the provider's rate-limit state.
         if same_credentials(existing, key, token):
+            if self.provider_id=='elsevier':existing.prefer_xml=self.xml_first.get()
             self.refresh()
             return True
         try:
             factory = FACTORIES[self.provider_id]
-            client = factory(key, token) if self.provider_id == 'elsevier' else factory(key)
+            client = factory(key, token) if self.provider_id in ('elsevier', 'springer') else factory(key)
+            if self.provider_id=='elsevier':client.prefer_xml=self.xml_first.get()
         except ValueError as exc:
             messagebox.showinfo('检查填写内容', str(exc), parent=self.window)
             return False
@@ -211,7 +224,7 @@ class PublisherAPIWindow:
 
     def open_school(self):
         if not self.owner.busy:
-            self.owner._open_zotero()
+            self.owner._choose_fulltext()
 
     def check_access(self):
         if self.owner.busy or self.provider_id != 'springer':
@@ -241,7 +254,7 @@ class PublisherAPIWindow:
         self.owner._start_job('正在检查 Springer Key / 查询通道……', run_check, done)
         self.refresh()
 
-    def test_selected(self):
+    def test_selected(self,*,format='pdf'):
         if self.owner.busy:
             return
         record = self.owner._selected()
@@ -264,11 +277,18 @@ class PublisherAPIWindow:
             self.owner._show_run(payload['run'], preserve_selection=record_id)
             result = payload['check']
             message = result['message']
+            if result.get('http_status'):
+                from access_status import EXPLANATIONS
+                code=result['http_status']
+                message='HTTP '+str(code)+'：'+EXPLANATIONS.get(code,'请求未完成。')+'\n\n'+message
+                if code in (401,403):message+='\n\n可关闭本窗口，选择“浏览器登录后采集”；学校登录在专用浏览器内完成。'
             if result.get('local_path'):
                 message += '\n\n已接收至：\n' + result['local_path']
+            if result.get('local_xml'):
+                message += '\n\nXML 正文已接收至：\n' + result['local_xml']
             if result.get('retry_after_seconds'):
                 message += '\n\n请至少等待约 ' + str(round(result['retry_after_seconds'])) + ' 秒后再试。'
-            if result['status'] == 'downloaded':
+            if result['status'] in ('downloaded','downloaded_xml'):
                 message += '\n\n可以回到板块1进入第二板块。'
             self.show(message)
             self.owner.status_var.set(result['message'])
@@ -277,7 +297,7 @@ class PublisherAPIWindow:
 
         self.owner._start_job('正在验证出版社全文访问……',
             lambda: engine.check_publisher_pdf(run, record_id, client, progress=self.owner._progress,
-                                              cancel_event=self.owner.cancel_event), done)
+                                              cancel_event=self.owner.cancel_event,format=format), done)
         self.refresh()
 
     def help(self):

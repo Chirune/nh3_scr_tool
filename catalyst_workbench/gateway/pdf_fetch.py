@@ -17,6 +17,7 @@ from pypdf import PdfReader
 MAX_PDF_BYTES=40*1024*1024
 MAX_META_BYTES=4*1024*1024
 STATUS_LABELS={'available':'已有 PDF','downloaded':'PDF 已获取','not_found':'未找到开放 PDF',
+ 'downloaded_xml':'XML 正文已获取','available_xml':'已有 XML 正文','api_xml_unavailable':'未取得有效 XML 正文',
  'access_required':'下载受限','network_error':'网络未完成','identity_unverified':'PDF 身份待核对',
  'source_changed':'原 PDF 已变化','cancelled':'已停止','queued':'等待获取','fetching':'正在获取',
  'missing_doi':'缺少 DOI','api_authentication':'API 认证未通过','api_permission':'API 全文权限待确认',
@@ -32,7 +33,7 @@ def now():return datetime.now(timezone.utc).isoformat(timespec='seconds')
 
 class Stopped(Exception):pass
 class FetchError(Exception):
-    def __init__(self,status,message):super().__init__(message);self.status=status
+    def __init__(self,status,message,http_status=None):super().__init__(message);self.status=status;self.http_status=http_status
 
 
 def selected_records(run):
@@ -41,7 +42,13 @@ def selected_records(run):
 
 def status_label(record):
     state=record.get('pdf_acquisition',{}).get('status')
-    if state:return STATUS_LABELS.get(state,state)
+    if state:
+        label=STATUS_LABELS.get(state,state)
+        if state not in ('available','downloaded','available_xml','downloaded_xml'):
+            from access_status import failures
+            codes=list(dict.fromkeys(str(r['http_status']) for r in failures(record)))
+            if codes:label+=' · HTTP '+ '/'.join(codes)
+        return label
     path=Path(record.get('local_path') or '')
     return '已有 PDF' if path.suffix.lower()=='.pdf' and path.is_file() else '待自动获取'
 
@@ -89,7 +96,7 @@ def request_bytes(url,limit=MAX_META_BYTES,cancel_event=None):
     except HTTPError as exc:
         kind='access_required' if exc.code in (401,403) else 'network_error' if exc.code in (429,500,502,503,504) else 'not_found'
         message=f'HTTP {exc.code}：'+('网站要求授权或限制自动访问。' if kind=='access_required' else '该入口暂不可用。')
-        raise FetchError(kind,message) from exc
+        raise FetchError(kind,message,http_status=exc.code) from exc
     except (URLError,TimeoutError,socket.timeout,OSError) as exc:
         raise FetchError('network_error','连接失败或超时：'+str(exc)[:160]) from exc
 
@@ -215,6 +222,19 @@ def existing_file(record,base):
     return {'local_path':str(path.resolve()),'local_sha256':actual,'pages':len(reader.pages),'status':'available'}
 
 
+def existing_xml(record,base):
+    if not record.get('local_xml'):return None
+    from elsevier_xml import read_xml
+    path=Path(record['local_xml'])
+    if not path.is_absolute():path=Path(base)/path
+    if not path.is_file():raise FetchError('source_changed','原 XML 不存在，请重新接收。')
+    parsed=read_xml(path,record)
+    if not record.get('xml_sha256') or parsed['sha256']!=record['xml_sha256']:
+        raise FetchError('source_changed','XML 与接收时的来源不一致，请重新核对。')
+    return {'status':'available_xml','local_xml':str(path.resolve()),'xml_sha256':parsed['sha256'],
+            'source_kind':'elsevier_xml','blocks':len(parsed['blocks']),'doi_verified':parsed['doi_verified']}
+
+
 def fetch_record(record,run_dir,cancel_event=None,progress=None,publisher_client=None):
     attempts=[];seen=set();queue=[];landing=[];expected=_doi(record.get('doi'));start=now()
     def emit(text):
@@ -233,8 +253,12 @@ def fetch_record(record,run_dir,cancel_event=None,progress=None,publisher_client
                 provenance={key:previous[key] for key in ('source_url','source_path','access_basis','identity_check',
                     'doi_verified','title_coverage','identifier_type','identifier_value','doi_printed_in_pdf',
                     'acquisition_method','zotero_item_key','zotero_attachment_key','quota',
-                    'metadata_source_url','publisher_api_provider','open_access_verified') if key in previous}
+                    'metadata_source_url','publisher_api_provider','open_access_verified','page_basis','fulltext_completeness') if key in previous}
             return result('available','已核对本地 PDF，直接交给图片扫描。',**provenance,**{k:v for k,v in local.items() if k!='status'})
+        xml=existing_xml(record,run_dir)
+        if xml:
+            return result('available_xml','已复验本地 XML 正文，可进入第二板块；图片读数仍需 PDF。',
+                          **{k:v for k,v in xml.items() if k!='status'})
     except Exception as exc:return result(getattr(exc,'status','source_changed'),str(exc))
     if not expected:return result('missing_doi','没有 DOI，暂不能自动核对下载文件与论文的关系。')
     api_failure=None
@@ -244,7 +268,8 @@ def fetch_record(record,run_dir,cancel_event=None,progress=None,publisher_client
         active_client=select_client(publisher_client,record)
         if active_client is not None:
             try:
-                info=active_client.fetch_pdf(record,run_dir,cancel_event,progress)
+                fetch=getattr(active_client,'fetch_fulltext',active_client.fetch_pdf)
+                info=fetch(record,run_dir,cancel_event,progress)
                 return result(info['status'],info['message'],**{k:v for k,v in info.items()
                     if k not in ('status','message','record_id','doi','attempts','started_at','finished_at')})
             except Stopped:return result('cancelled','已停止获取，已完成的论文保留。')
@@ -290,7 +315,7 @@ def fetch_record(record,run_dir,cancel_event=None,progress=None,publisher_client
                 return result('downloaded','PDF 已自动获取并通过论文身份核验。',local_path=str(target.resolve()),
                               local_sha256=checked['sha256'],source_url=final,requested_url=url,access_basis=basis,**checked)
             except Stopped:raise
-            except Exception as exc:attempts.append({'url':url,'status':getattr(exc,'status','network_error'),'message':str(exc)[:300]})
+            except Exception as exc:attempts.append({'url':url,'status':getattr(exc,'status','network_error'),'http_status':getattr(exc,'http_status',None),'message':str(exc)[:300]})
         return None
     try:
         ready=consume(3)
@@ -306,7 +331,7 @@ def fetch_record(record,run_dir,cancel_event=None,progress=None,publisher_client
                     elif loc.get('landing_page_url'):add(loc['landing_page_url'],'OpenAlex_OA_landing')
             attempts.append({'url':meta_url,'status':'metadata_received'})
         except Stopped:raise
-        except Exception as exc:attempts.append({'url':meta_url,'status':getattr(exc,'status','network_error'),'message':str(exc)[:200]})
+        except Exception as exc:attempts.append({'url':meta_url,'status':getattr(exc,'status','network_error'),'http_status':getattr(exc,'http_status',None),'message':str(exc)[:200]})
         ready=consume(4)
         if ready:return ready
         # Prefer explicit OA landing pages over DOI resolver pages.
@@ -325,7 +350,7 @@ def fetch_record(record,run_dir,cancel_event=None,progress=None,publisher_client
                 ready=consume(3)
                 if ready:return ready
             except Stopped:raise
-            except Exception as exc:attempts.append({'url':url,'status':getattr(exc,'status','network_error'),'message':str(exc)[:200]})
+            except Exception as exc:attempts.append({'url':url,'status':getattr(exc,'status','network_error'),'http_status':getattr(exc,'http_status',None),'message':str(exc)[:200]})
         kinds={a['status'] for a in attempts}
         if api_failure:
             return result(api_failure['status'],api_failure['message']+' 本次也未取得可核验的开放 PDF。',
@@ -364,6 +389,8 @@ def acquire_retained(run,progress=None,cancel_event=None,persist=None,publisher_
                 record['pdf_acquisition']=info
                 if info['status'] in ('downloaded','available'):
                     record.update(local_path=info['local_path'],local_sha256=info['local_sha256'])
+                elif info['status'] in ('downloaded_xml','available_xml'):
+                    record.update(local_xml=info['local_xml'],xml_sha256=info['xml_sha256'],xml_acquisition=info)
                 completed+=1;results.append(info)
                 emit(f'PDF 获取进度 {completed}/{len(records)}：{record.get("doi","")} · {STATUS_LABELS.get(info["status"],info["status"])}')
                 if persist:persist(run)
@@ -371,9 +398,10 @@ def acquire_retained(run,progress=None,cancel_event=None,persist=None,publisher_
     cancelled=bool(cancel_event is not None and cancel_event.is_set())
     summary={'selected':len(records),'completed':completed,'downloaded':sum(r['status']=='downloaded' for r in results),
              'available':sum(r['status']=='available' for r in results),
-             'failed':sum(r['status'] not in ('downloaded','available','cancelled') for r in results),
+             'xml_ready':sum(r['status'] in ('downloaded_xml','available_xml') for r in results),
+             'failed':sum(r['status'] not in ('downloaded','available','downloaded_xml','available_xml','cancelled') for r in results),
              'cancelled':cancelled,'unprocessed':len(records)-completed,'at':now()}
-    summary['ready']=summary['downloaded']+summary['available']
+    summary['ready']=summary['downloaded']+summary['available']+summary['xml_ready']
     run['pdf_acquisition_summary']=summary
     root=Path(run['run_dir']);root.mkdir(parents=True,exist_ok=True)
     (root/'PDF获取记录.json').write_text(json.dumps({'summary':summary,'records':results},ensure_ascii=False,indent=2),encoding='utf8')

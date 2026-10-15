@@ -468,7 +468,7 @@ class CodingAppTests(unittest.TestCase):
         window.attributes('-alpha', 0.0)
         window.geometry('1020x700+0+0')
         window.deiconify()
-        for tab, labels in ((1, ('确认句子含义', '核对样品与对照', '补充到已有记录')),
+        for tab, labels in ((1, ('查看建议并确认', '核对样品与对照', '补充到已有记录')),
                             (3, ('交给第三板块：导出待编码包', '进入第三板块：数据编码', '打开论文结果文件夹'))):
             gui.tabs.select(tab)
             self.root.update()

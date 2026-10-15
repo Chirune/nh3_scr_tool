@@ -1,13 +1,13 @@
 """Official Article Retrieval API; credentials stay in process memory.
 
 Reference: https://dev.elsevier.com/documentation/ArticleRetrievalAPI.wadl
-This adapter requests PDF/FULL explicitly. Metadata or login pages must never
-be mistaken for a full-text PDF. Only a verified PDF reaches the screening row.
+PDF/FULL and XML/FULL are explicit formats; metadata is never a full text.
 """
 from __future__ import annotations
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
+import json
 from http.client import IncompleteRead
 import math
 from pathlib import Path
@@ -20,10 +20,12 @@ from urllib.request import Request, HTTPRedirectHandler, build_opener
 import uuid
 
 from pdf_fetch import MAX_PDF_BYTES, FetchError, Stopped, _doi, inspect_pdf, public_url
+from elsevier_xml import parse_xml, MAX_XML_BYTES
 
 REGISTER_URL='https://dev.elsevier.com/apikey/manage'
 AUTH_URL='https://dev.elsevier.com/tecdoc_api_authentication.html'
 ARTICLE_DOCS='https://dev.elsevier.com/documentation/ArticleRetrievalAPI.wadl'
+TEXT_MINING_DOCS='https://dev.elsevier.com/tecdoc_text_mining.html'
 ACS_TDM_URL='https://solutions.acs.org/solutions/text-and-data-mining/'
 API_ORIGIN='https://api.elsevier.com'
 
@@ -34,8 +36,10 @@ class APIError(FetchError):
         self.http_status=http_status;self.retry_after_seconds=retry_after_seconds
 
     def public_details(self):
-        return {'status':self.status,'message':str(self),'http_status':self.http_status,
+        result={'status':self.status,'message':str(self),'http_status':self.http_status,
                 'retry_after_seconds':self.retry_after_seconds}
+        if hasattr(self,'xml_failure'):result['xml_attempt']=self.xml_failure
+        return result
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -80,18 +84,19 @@ class ElsevierClient:
     """An explicitly enabled, per-application session. Not serializable config."""
     provider_id='elsevier'
     provider_label='Elsevier official API'
-    def __init__(self,api_key,insttoken='',*,opener=None,minimum_interval=1.0):
+    def __init__(self,api_key,insttoken='',*,opener=None,minimum_interval=1.0,prefer_xml=False):
         self._api_key=_credential(api_key,'Elsevier API Key',True)
         self._insttoken=_credential(insttoken,'Institutional Token')
         self._opener=opener or build_opener(NoRedirect())
         self._lock=threading.Lock();self._last_started=0.0
         self._minimum_interval=max(0.0,float(minimum_interval))
         self._blocked_until=0.0;self._invalid=False
+        self.prefer_xml=bool(prefer_xml)
 
     def __repr__(self):return '<ElsevierClient: credentials hidden, memory only>'
 
-    def _headers(self,url):
-        headers={'Accept':'application/pdf','User-Agent':'CuZn-LiteratureGateway/0.3 (academic literature retrieval)'}
+    def _headers(self,url,accept='application/pdf'):
+        headers={'Accept':accept,'User-Agent':'CuZn-LiteratureGateway/0.3 (academic literature retrieval)'}
         if urlsplit(url).hostname=='api.elsevier.com':
             headers['X-ELS-APIKey']=self._api_key
             if self._insttoken:headers['X-ELS-Insttoken']=self._insttoken
@@ -117,10 +122,10 @@ class ElsevierClient:
             delay=_retry_delay(headers);self._blocked_until=time.monotonic()+delay
             return APIError('api_rate_limit','Elsevier API 已限流或配额不足（429），已暂停该通道，不会连续重试。',code,delay)
         if code==404:return APIError('api_not_found','API 未找到这篇文章（404），请核对 DOI 及出版平台。',code)
-        if code in (400,406):return APIError('api_response','API 未接受本次 PDF 全文请求，请核对 DOI、文章格式和接口权限。',code)
+        if code in (400,406):return APIError('api_response','API 未接受本次全文请求，请核对 DOI、文章格式和接口权限。',code)
         return APIError('api_network',f'Elsevier API 本次返回 HTTP {code}，暂未取得 PDF。',code)
 
-    def _request_pdf(self,url,cancel_event=None):
+    def _request_pdf(self,url,cancel_event=None,*,accept='application/pdf',limit=MAX_PDF_BYTES):
         # Serialize requests for this session, including requests made by the
         # existing two-worker public-download queue.
         with self._lock:
@@ -139,7 +144,7 @@ class ElsevierClient:
                 if cancel_event is not None and cancel_event.is_set():raise Stopped()
                 if time.monotonic()-started>45:raise APIError('api_network','全文下载超时，本次已停止。')
                 try:
-                    response=self._opener.open(Request(current,headers=self._headers(current)),timeout=15)
+                    response=self._opener.open(Request(current,headers=self._headers(current,accept)),timeout=15)
                 except HTTPError as exc:
                     if exc.code in (301,302,303,307,308):
                         quota.update(_quota(exc.headers))
@@ -154,19 +159,61 @@ class ElsevierClient:
                     quota.update(_quota(response.headers))
                     try:length=int(response.headers.get('Content-Length','0'))
                     except (TypeError,ValueError):length=0
-                    if length>MAX_PDF_BYTES:raise APIError('api_response','全文超过本次 40 MB 下载上限。')
+                    if length>limit:raise APIError('api_response','全文超过本次 40 MB 下载上限。')
                     chunks=[];size=0
                     while True:
                         if cancel_event is not None and cancel_event.is_set():raise Stopped()
                         if time.monotonic()-started>45:raise APIError('api_network','全文下载超时，本次已停止。')
-                        try:chunk=response.read(min(128*1024,MAX_PDF_BYTES+1-size))
+                        try:chunk=response.read(min(128*1024,limit+1-size))
                         except (OSError,TimeoutError,IncompleteRead):raise APIError('api_network','下载正文时连接中断，未保存不完整 PDF。') from None
                         if not chunk:break
                         chunks.append(chunk);size+=len(chunk)
-                        if size>MAX_PDF_BYTES:raise APIError('api_response','全文超过本次 40 MB 下载上限。')
+                        if size>limit:raise APIError('api_response','全文超过本次 40 MB 下载上限。')
                     if length>0 and size!=length:raise APIError('api_network','收到的文件长度与服务器声明不一致，未保存不完整 PDF。')
                     return b''.join(chunks),quota
             raise APIError('api_response','全文重定向次数过多，未继续请求。')
+
+    def fetch_xml(self,record,run_dir,cancel_event=None,progress=None):
+        if not supports(record):
+            raise APIError('api_not_supported','当前 XML 接口只用于已识别的 Elsevier 论文。')
+        url=API_ORIGIN+'/content/article/doi/'+quote(_doi(record.get('doi')),safe='/')+'?view=FULL'
+        if progress:progress('Elsevier TDM：请求 XML 全文 · '+record['doi'])
+        data,quota=self._request_pdf(url,cancel_event,accept='text/xml',limit=MAX_XML_BYTES)
+        try:parsed=parse_xml(data,record)
+        except ValueError as exc:raise APIError('api_xml_unavailable',str(exc)) from None
+        if cancel_event is not None and cancel_event.is_set():raise Stopped()
+        folder=Path(run_dir)/'Elsevier_API全文';folder.mkdir(parents=True,exist_ok=True)
+        stem=hashlib.sha256(parsed['doi_verified'].encode()).hexdigest()[:18]+'_'+parsed['sha256'][:12]
+        target=folder/(stem+'.xml')
+        if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest()!=parsed['sha256']:
+            raise APIError('source_changed','已有 XML 内容发生变化，未覆盖。')
+        if not target.exists():
+            temporary=folder/(stem+'.'+uuid.uuid4().hex[:8]+'.part')
+            temporary.write_bytes(data);temporary.replace(target)
+        index=folder/(stem+'_正文结构.json')
+        index.write_text(json.dumps(parsed,ensure_ascii=False,indent=2),encoding='utf-8')
+        return {'status':'downloaded_xml','message':'已取得并核对 Elsevier XML 全文；可进入第二板块读取正文，图像读数仍需 PDF。',
+                'record_id':record.get('id'),'doi':parsed['doi_verified'],'local_xml':str(target.resolve()),
+                'xml_sha256':parsed['sha256'],'xml_structure_path':str(index.resolve()),'source_kind':'elsevier_xml',
+                'source_url':url,'requested_url':url,'access_basis':'elsevier_tdm_xml','acquisition_method':'official_elsevier_api',
+                'publisher_api_provider':'elsevier','identity_check':parsed['identity_check'],'doi_verified':parsed['doi_verified'],
+                'title_coverage':parsed['title_coverage'],'bytes':parsed['bytes'],'blocks':len(parsed['blocks']),
+                'tables':len(parsed['tables']),'quota':quota,'attempts':[],
+                'finished_at':datetime.now(timezone.utc).isoformat(timespec='seconds')}
+
+    def fetch_fulltext(self,record,run_dir,cancel_event=None,progress=None):
+        if not self.prefer_xml:return self.fetch_pdf(record,run_dir,cancel_event,progress)
+        try:return self.fetch_xml(record,run_dir,cancel_event,progress)
+        except APIError as exc:
+            if exc.status in ('api_authentication','api_rate_limit'):raise
+            xml_failure=exc.public_details()
+        try:
+            result=self.fetch_pdf(record,run_dir,cancel_event,progress)
+        except APIError as exc:
+            exc.xml_failure=xml_failure
+            raise
+        result['xml_attempt']=xml_failure
+        return result
 
     def fetch_pdf(self,record,run_dir,cancel_event=None,progress=None):
         if not supports(record):raise APIError('api_not_supported','这篇论文未识别为 Elsevier；当前 API 入口不用于 ACS 或其他出版社。')

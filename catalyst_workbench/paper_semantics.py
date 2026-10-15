@@ -279,7 +279,9 @@ def _measurement(tail):
 def _preceding_measurement(prefix):
     # Only a directly attached unit-bearing value. Loadings, citations and
     # sample suffixes are never assigned by approximate textual proximity.
-    m = re.search(rf'(?:(?:{_BOUND_WORDS})\s+)?(?:(?:about|approximately|around|~|≈)\s*)?{NUMBER}\s*(?:{_UNIT})\s*$',prefix,re.I)
+    # Symbols need no separating space (<20%). Do not backtrack into a
+    # bare number after discarding its bound, sign or approximate prefix.
+    m = re.search(rf'(?<![\w.+−–<>≤≥=/~≈-])(?:(?:{_BOUND_WORDS})\s*)?(?:(?:about|approximately|around|~|≈)\s*)?{NUMBER}\s*(?:{_UNIT})\s*$',prefix,re.I)
     if not m: return None
     result = _quantity(prefix,m.start())
     if result: result['end'] = len(prefix.rstrip())

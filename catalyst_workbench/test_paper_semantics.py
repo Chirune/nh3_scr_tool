@@ -5,6 +5,17 @@ from paper_semantics import MAX_TEXT_LENGTH, semantic_candidates
 
 
 class SemanticCandidateTests(unittest.TestCase):
+    def test_preceding_bound_without_space_keeps_inequality(self):
+        for symbol, operator in (('<', 'lt'), ('<=', 'le'), ('≤', 'le'),
+                                 ('>', 'gt'), ('>=', 'ge'), ('≥', 'ge')):
+            for space in ('', ' '):
+                with self.subTest(symbol=symbol, space=space):
+                    text = f'We selected Cu-0.5 for kinetic evaluations in the kinetically limited region ({symbol}{space}20% NO x conversion).'
+                    item = self.one(text)
+                    self.assertEqual((item['value'], item['operator']), (20.0, operator))
+                    self.assertFalse(item['numeric_eligible'])
+                    self.assertEqual(text[item['start']:item['end']], item['evidence_quote'])
+
     def one(self, text):
         result = semantic_candidates(text)
         self.assertEqual(len(result), 1, result)

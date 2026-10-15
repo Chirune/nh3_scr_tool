@@ -1,12 +1,12 @@
 """Small local Zotero handoff window for the literature gateway."""
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import webbrowser
 
 import engine
 from pdf_fetch import selected_records
-from zotero_bridge import LocalZotero, BridgeError, sync_run
+from zotero_bridge import LocalZotero, BridgeError, sync_run, export_retained_ris
 
 
 class ZoteroWindow:
@@ -26,10 +26,16 @@ class ZoteroWindow:
         outer.pack(fill='both', expand=True)
         bottom = ttk.Frame(outer)
         bottom.pack(side='bottom', fill='x')
-        ttk.Label(outer, text='把有权限阅读的论文接到图片识别', style='Title.TLabel').pack(anchor='w')
+        ttk.Label(outer, text='用 Zotero 接收正文，再提取论文数据', style='Title.TLabel').pack(anchor='w')
         steps = ('板块 1 保留论文 → 浏览器学校登录 → 点 Zotero 保存正文 → 本窗口接收。\n'
                  '请保存到“我的文库”，确认条目下有 PDF；具体步骤见底部“详细操作说明”。')
         ttk.Label(outer, text=steps, wraplength=780, justify='left').pack(fill='x', pady=12)
+        setup = ttk.Frame(outer)
+        setup.pack(fill='x', pady=(0, 6))
+        ttk.Button(setup, text='安装 Zotero / 浏览器 Connector',
+                   command=lambda: webbrowser.open('https://www.zotero.org/download/')).pack(side='left')
+        self.export_button = ttk.Button(setup, text='导出保留论文清单（RIS）', command=self.export_ris)
+        self.export_button.pack(side='left', padx=7)
         row = ttk.Frame(outer)
         row.pack(fill='x', pady=4)
         for text, command in [('检测 Zotero 连接', self.check), ('打开选中论文网页', parent._open_article)]:
@@ -147,11 +153,30 @@ class ZoteroWindow:
         self.parent._launch_figures()
 
     def guide(self):
-        path = Path(__file__).resolve().parents[2] / 'docs/workbench/tutorial.html'
+        path = Path(__file__).resolve().parents[2] / 'docs/workbench/ZOTERO_QUICKSTART.html'
         if path.is_file():
             webbrowser.open(path.as_uri())
         else:
             messagebox.showinfo('连接方式', '在 Zotero 设置 → 高级中允许其他本机程序通信。浏览器保存论文后，本窗口按 DOI 接收已下载的正文 PDF。', parent=self.window)
+
+    def export_ris(self):
+        if self.parent.busy:
+            self.status.set('请等待当前处理结束，再导出保留清单。')
+            return
+        if not selected_records(self.parent.run or {}):
+            self.status.set('先在板块1核对摘要并把论文判定为“保留”。')
+            return
+        destination = filedialog.asksaveasfilename(parent=self.window, title='导出保留论文清单，供 Zotero 导入',
+            initialfile='保留论文_Zotero.ris', defaultextension='.ris', filetypes=[('RIS 文献清单', '*.ris')])
+        if not destination:
+            return
+        try:
+            result = export_retained_ris(self.parent.run, destination)
+        except (BridgeError, OSError) as exc:
+            self.status.set(str(exc))
+            return
+        self.status.set(f"已导出 {result['exported']} 篇；缺少 DOI 跳过 {result['skipped_missing_doi']} 篇。"
+                       '在 Zotero 中选择“文件 → 导入”，导入 RIS。清单仅含题录与已有摘要，PDF 仍需保存。')
 
     def close(self):
         self.closed = True

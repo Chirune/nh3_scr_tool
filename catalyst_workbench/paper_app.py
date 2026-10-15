@@ -230,7 +230,7 @@ class PaperWorkbench:
     def build_text(self):
         frame=self.frames[0];bar=ttk.Frame(frame);bar.pack(fill='x',pady=(0,7))
         self.button(bar,'读取全文并提取数值',self.extract,True).pack(side='left')
-        self.button(bar,'打开原 PDF 核对',self.open_pdf).pack(side='left',padx=6)
+        self.button(bar,'打开原正文核对',self.open_pdf).pack(side='left',padx=6)
         self.button(bar,'导出本篇数值清单',self.export_numbers).pack(side='left')
         self.text_tabs=ttk.Notebook(frame);self.text_tabs.pack(fill='both',expand=True)
         overview=ttk.Frame(self.text_tabs,padding=6);raw=ttk.Frame(self.text_tabs,padding=6)
@@ -256,7 +256,7 @@ class PaperWorkbench:
         show_text(self.numeric_detail,'选择一行，查看原句、单位、用途和条件缺口。只有核对后的样品—条件—性能记录才进入编码。')
         frame=raw;bar=ttk.Frame(frame);bar.pack(fill='x',pady=(0,7))
         self.button(bar,'把选中的原文留作证据',self.capture).pack(side='left')
-        ttk.Label(bar,text='页码').pack(side='left',padx=(12,4))
+        ttk.Label(bar,text='页 / XML段').pack(side='left',padx=(12,4))
         self.page_combo=ttk.Combobox(bar,textvariable=self.page_var,width=5,state='readonly');self.page_combo.pack(side='left')
         self.page_combo.bind('<<ComboboxSelected>>',lambda e:self.show_page())
         ttk.Label(frame,text='这里是核对用原文。提取结果请看左侧“数值清单”；复杂表格和扫描页仍可能需要人工补充。',wraplength=1150).pack(anchor='w',pady=(0,6))
@@ -279,11 +279,12 @@ class PaperWorkbench:
         frame.bind('<Configure>',lambda event:hint.configure(wraplength=max(300,event.width-20)))
         bar=ttk.Frame(frame);bar.pack(fill='x',pady=(0,7))
         self.button(bar,'重新扫描全文语义',lambda:self.extract(focus='semantic'),True).pack(side='left')
-        self.button(bar,'标注如何采纳',self.adopt_semantics,True).pack(side='left',padx=6)
+        self.button(bar,'查看建议并确认',self.adopt_semantics,True).pack(side='left',padx=6)
+        self.button(bar,'全篇生成分类建议',self.suggest_all_semantics,True).pack(side='left')
         self.button(bar,'导出语义清单',self.export_semantics).pack(side='left')
         self.button(bar,'回到原文页',lambda:self.goto_evidence(self.semantic_tree)).pack(side='left',padx=6)
         second=ttk.Frame(frame);second.pack(fill='x',pady=(0,7))
-        self.button(second,'确认句子含义',lambda:self.review(self.semantic_tree,'reviewed')).pack(side='left')
+        self.button(second,'安装 / 启动本机模型',self.setup_local_assistant).pack(side='left')
         self.button(second,'不采用',lambda:self.adopt_semantics('exclude')).pack(side='left',padx=6)
         self.button(second,'核对样品与对照',self.annotate_semantics).pack(side='left')
         self.button(second,'用明确数值建立记录',lambda:self.use_evidence(self.semantic_tree)).pack(side='left',padx=6)
@@ -406,10 +407,10 @@ class PaperWorkbench:
         show_text(self.numeric_detail,'请选择当前清单中的论文。')
         self.show_page()
         for box in (self.semantic_detail,self.image_detail,self.record_detail):show_text(box,'请选择当前清单中的论文。')
-        self.article_info.set('请选择一篇已取得 PDF 的论文。')
+        self.article_info.set('请选择一篇已取得 PDF 或 XML 正文的论文。')
         labels=[f"{i+1}. {p.get('title') or Path(p['local_pdf']).name}" for i,p in enumerate(self.papers)]
         self.paper_combo.configure(values=labels)
-        self.status.set(f'可整理 {len(self.papers)} 篇；另有 {len(waiting)} 篇等待取得 PDF 或筛选核对。')
+        self.status.set(f'可整理 {len(self.papers)} 篇；另有 {len(waiting)} 篇等待取得正文或筛选核对。')
         if labels:
             self.paper_var.set(labels[0])
             if open_first:self.select_paper()
@@ -429,11 +430,13 @@ class PaperWorkbench:
             self.reset_semantic_filters()
             self.numeric_scope.set('科学数值（不含背景要求）');self.text_tabs.select(0)
         self.project=project;article=project['article']
+        xml=article.get('source_kind')=='elsevier_xml'
+        for tree in (self.numeric_tree,self.text_tree,self.semantic_tree):tree.heading('page',text='XML段' if xml else '页')
         matching=next((i for i,p in enumerate(self.papers) if p.get('source_sha256')==article['source_sha256']),None)
         if matching is not None:self.paper_combo.current(matching)
         else:self.paper_var.set(article.get('title') or Path(article['local_pdf']).name)
         self.task_var.set(work.TASKS[project['task_id']]['title'])
-        self.article_info.set((article.get('title') or Path(article['local_pdf']).name)+'\nDOI：'+(article.get('doi') or '待核对'))
+        self.article_info.set((article.get('title') or Path(work.source_path(article)).name)+'\nDOI：'+(article.get('doi') or '待核对')+(' · XML正文（无原版页码）' if xml else ''))
         if project.get('workspace_usage')=='workflow_validation':
             self.article_info.set(self.article_info.get()+' · 流程演示档案；正式研究请从板块1进入。')
         self.page_combo.configure(values=[str(p['page']) for p in project['pages']])
@@ -457,14 +460,15 @@ class PaperWorkbench:
             self.set_project(value)
             self.tabs.select(1 if focus=='semantic' else 0);self.text_tabs.select(0)
             report=numbers.numeric_overview(value)
-            self.status.set(f"已扫描全文 {len(value['pages'])} 页，得到 {len(report['rows'])} 项数值和 {sum(e['branch']=='semantic' for e in value['evidence'])} 条语义候选；待核对，不等于训练样本。")
+            unit='段 XML 原文' if value['article'].get('source_kind')=='elsevier_xml' else '页'
+            self.status.set(f"已扫描全文 {len(value['pages'])} {unit}，得到 {len(report['rows'])} 项数值和 {sum(e['branch']=='semantic' for e in value['evidence'])} 条语义候选；待核对，不等于训练样本。")
         self.job(lambda:work.extract_document(snapshot),done,'正在扫描全文：提取数值，以及比较、比值、计算关系、定性趋势和展望……')
 
     def show_page(self):
         page=next((p for p in (self.project or {}).get('pages',[]) if str(p['page'])==self.page_var.get()),None)
         show_text(self.page_text,page['text'] if page else '先点击“读取全文并提取数值”。')
         self.page_text.tag_remove('evidence_focus','1.0','end')
-        self.location_hint.set('从语义分支点击“回到原文页”，可直接定位并高亮原句。')
+        self.location_hint.set(page.get('location_label') if page and page.get('source_kind')=='elsevier_xml' else '从语义分支点击“回到原文页”，可直接定位并高亮原句。')
 
     def reset_semantic_filters(self):
         self.semantic_state.set('全部状态');self.semantic_kind.set('全部类型');self.semantic_query.set('')
@@ -545,32 +549,42 @@ class PaperWorkbench:
         try:
             evidence=self.selected_evidence(self.semantic_tree)
             if evidence.get('stale'):raise ValueError('这是已被替换的旧证据，请选择当前语义候选。')
-            old=evidence.get('semantic_adoption',{})
-            dialog=tk.Toplevel(self.root);dialog.title('这句话准备如何使用');dialog.geometry('850x620');dialog.minsize(650,460);dialog.transient(self.root)
-            box,original=text_area(dialog,11);box.pack(fill='both',expand=True,padx=14,pady=(14,6))
-            self.describe_evidence(self.semantic_tree,original)
-            form=ttk.Frame(dialog,padding=14);form.pack(fill='x');form.columnconfigure(1,weight=1)
-            choice=tk.StringVar(value=work.SEMANTIC_USES.get(purpose or old.get('purpose'),'待决定如何采纳'))
-            reviewer=tk.StringVar(value=self.reviewer.get() or old.get('reviewer',''))
-            note=tk.StringVar(value=old.get('note',''));confirm=tk.BooleanVar(value=False)
-            for row,label in enumerate(('采纳方式','审核人 / 组员代号','采纳依据 / 尚待核对的问题')):
-                ttk.Label(form,text=label).grid(row=row,column=0,sticky='w',padx=(0,10),pady=7)
-            ttk.Combobox(form,textvariable=choice,values=list(work.SEMANTIC_USES.values()),state='readonly').grid(row=0,column=1,sticky='ew')
-            ttk.Entry(form,textvariable=reviewer).grid(row=1,column=1,sticky='ew')
-            ttk.Entry(form,textvariable=note).grid(row=2,column=1,sticky='ew')
-            ttk.Checkbutton(form,text='已对照原文核对句子含义（未勾选时仍为待核对）',variable=confirm).grid(row=3,column=0,columnspan=2,sticky='w',pady=9)
-            ttk.Label(form,text='这里只保存用途和判断依据。定性、未来预期和相对关系不会因此变成实测数值；不明确的幅度继续留空。',wraplength=780).grid(row=4,column=0,columnspan=2,sticky='w',pady=8)
-            def save():
-                try:
-                    selected=next(k for k,v in work.SEMANTIC_USES.items() if v==choice.get())
-                    work.set_semantic_adoption(self.project,evidence['evidence_id'],selected,reviewer.get(),note.get(),confirm.get())
-                    self.reviewer.set(reviewer.get());dialog.destroy();self.refresh_lists()
-                    self.describe_evidence(self.semantic_tree,self.semantic_detail)
-                    self.status.set('采纳决定已保存。它将随语义清单及第三板块交接包一起保留。')
-                except Exception as exc:messagebox.showerror('尚未保存',str(exc),parent=dialog)
-            ttk.Button(form,text='保存采纳决定',command=save).grid(row=5,column=1,sticky='e',pady=7)
-            dialog.grab_set()
+            from semantic_adoption_ui import AdoptionDialog
+            self.adoption_dialog=AdoptionDialog(self,evidence,purpose)
         except Exception as exc:self.error(exc)
+
+    def setup_local_assistant(self):
+        root=Path(__file__).resolve().parent.parent
+        script=root/'scripts/setup_local_assistant.py'
+        log_dir=data_root()/'local_assistant';log_dir.mkdir(parents=True,exist_ok=True)
+        with (log_dir/'setup.log').open('ab') as stream:
+            subprocess.Popen([sys.executable,'-B',str(script)],cwd=root,stdout=stream,stderr=stream,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        self.status.set('正在安装或启动本机模型，首次需联网下载。完成后点“查看建议并确认”。安装日志：'+str(log_dir/'setup.log'))
+
+    def suggest_all_semantics(self):
+        if not self.guard():return
+        import semantic_assistant as assistant
+        project=copy.deepcopy(self.project)
+        selected=[e for e in project['evidence'] if e.get('branch')=='semantic' and not e.get('stale')
+                  and not e.get('semantic_adoption') and not
+                  (e.get('assistant_suggestion',{}).get('source_quote')==e.get('quote'))]
+        if not selected:
+            self.status.set('本篇当前候选已有建议或人工决定，可选一条后查看、确认或重新判断。');return
+        def worker():
+            count=0;errors=[]
+            for evidence in selected:
+                try:
+                    result=assistant.suggest(project,evidence)
+                    work.save_assistant_suggestion(project,evidence['evidence_id'],result)
+                    count+=1
+                except assistant.AssistantError as exc:
+                    errors.append(str(exc));break
+            return project,count,errors
+        def done(result):
+            project,count,errors=result;self.set_project(project)
+            self.status.set(f'已生成 {count} 条分类与中文说明建议；全部等待你确认。'+(' '+errors[0] if errors else ''))
+        self.job(worker,done,f'本机模型正在为 {len(selected)} 条语义候选生成建议；不会自动确认任何数据……')
 
     def refresh_numbers(self):
         if not self.project:return
@@ -626,7 +640,7 @@ class PaperWorkbench:
                 try:
                     updated=numbers.with_numeric_context(self.project,records[choice.current()],evidence)
                     dialog.destroy()
-                    RecordDialog(self.root,updated,self.reviewer.get(),self.save_record,evidence_text=f"补充条件来源：第 {evidence.get('page')} 页\n{evidence.get('quote','')}")
+                    RecordDialog(self.root,updated,self.reviewer.get(),self.save_record,evidence_text=f"补充条件来源：{work.evidence_location(evidence)}\n{evidence.get('quote','')}")
                 except Exception as exc:messagebox.showerror('尚未补充',str(exc),parent=dialog)
             ttk.Button(dialog,text='预填字段并打开核对表',command=prepare).pack(pady=10);dialog.grab_set()
         except Exception as exc:self.error(exc)
@@ -660,7 +674,7 @@ class PaperWorkbench:
         if not self.project or not tree.selection():return
         e=self.selected_evidence(tree)
         scroll=box.yview()[0] if keep_scroll else 0
-        info=f"第 {e.get('page','?')} 页 · {KINDS.get(e.get('kind'),e.get('kind','图像读数'))}\n"
+        info=f"{work.evidence_location(e)} · {KINDS.get(e.get('kind'),e.get('kind','图像读数'))}\n"
         if e['branch']=='semantic' and e.get('semantic_facets'):info+='科研关系：'+' / '.join(semantics.facet_labels(e))+'\n'
         info+=f"\n原始证据：\n{e.get('quote','')}\n\n"
         translation_span=None
@@ -703,6 +717,10 @@ class PaperWorkbench:
         if e.get('human_annotation'):info+='\n人工补充依据：'+e['human_annotation'].get('note','')+'\n'
         if e['branch']=='semantic':
             info+='\n需核对：\n'+'\n'.join('• '+p for p in semantics.review_prompts(e))+'\n'
+            suggestion=e.get('assistant_suggestion',{})
+            if suggestion.get('source_quote')==e.get('quote'):
+                info+='\n本机模型中文说明（待核对）：\n'+suggestion.get('summary_zh','')+'\n'
+                info+='建议依据：'+suggestion.get('reason_zh','')+'\n'
             info+='\n如何采纳：'+semantics.adoption_label(e)+'\n'
             if e.get('semantic_adoption'):info+='采纳依据：'+e['semantic_adoption'].get('note','')+'\n'
         if e.get('x_name'):info+=f"图中横轴：{e['x_name']} = {e.get('x_value')} {e.get('x_unit','')}\n"
@@ -779,7 +797,8 @@ class PaperWorkbench:
             last=int(self.root.tk.call('string','length',text[:end]))
             a,b=f'1.0+{first}c',f'1.0+{last}c'
             self.page_text.tag_add('evidence_focus',a,b);self.page_text.see(a)
-            self.location_hint.set(f'已高亮第 {e["page"]} 页原句（字符 {start}–{end}）；上下文仍完整保留。')
+            location=e.get('location_label') or f'第 {e["page"]} 页'
+            self.location_hint.set(f'已高亮 {location} 原句（字符 {start}–{end}）；上下文仍完整保留。')
             self.status.set('正在查看选中证据的原文位置。看完可回到“数值清单”或“② 语义关系”继续核对。')
         except Exception as exc:self.error(exc)
 
@@ -790,7 +809,7 @@ class PaperWorkbench:
             if e['branch']=='semantic' and e.get('kind') not in ('absolute','range'):
                 self.status.set('这是一条关系、定性或展望证据。请在语义分支核对；导出时会单独保留，不建立绝对值标签。');return
             item=work.record_from_evidence(self.project,[e['evidence_id']])
-            RecordDialog(self.root,item,self.reviewer.get(),self.save_record,evidence_text=f"第 {e.get('page','?')} 页：{e.get('quote','')}")
+            RecordDialog(self.root,item,self.reviewer.get(),self.save_record,evidence_text=f"{work.evidence_location(e)}：{e.get('quote','')}")
         except Exception as exc:self.error(exc)
 
     def use_image_series(self):
@@ -845,13 +864,13 @@ class PaperWorkbench:
         for eid in r['evidence_ids']:
             e=next(e for e in self.project['evidence'] if e['evidence_id']==eid)
             role='补充条件 / 解释' if r.get('evidence_roles',{}).get(eid)=='context' else '数值来源'
-            lines.append(f"第 {e.get('page','?')} 页｜{role}｜{e.get('quote','')}")
+            lines.append(f"{work.evidence_location(e)}｜{role}｜{e.get('quote','')}")
         show_text(self.record_detail,'\n'.join(lines))
 
     def edit_record(self):
         if not self.guard() or not self.record_tree.selection():return
         r=next(r for r in self.project['records'] if r['record_id']==self.record_tree.selection()[0])
-        evidence_text='\n'.join(f"第 {e.get('page','?')} 页：{e.get('quote','')}" for e in self.project['evidence'] if e['evidence_id'] in r['evidence_ids'])
+        evidence_text='\n'.join(f"{work.evidence_location(e)}：{e.get('quote','')}" for e in self.project['evidence'] if e['evidence_id'] in r['evidence_ids'])
         RecordDialog(self.root,r,self.reviewer.get(),self.save_record,evidence_text=evidence_text)
 
     def merge_records(self):
@@ -869,7 +888,7 @@ class PaperWorkbench:
         except Exception as exc:self.error(exc)
 
     def open_pdf(self):
-        if self.guard():os.startfile(self.project['article']['local_pdf'])
+        if self.guard():os.startfile(work.source_path(self.project['article']))
 
     def open_images(self):
         if not self.guard():return

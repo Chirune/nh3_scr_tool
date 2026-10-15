@@ -1,7 +1,9 @@
-"""Small, read-only public metadata adapters; no credentials or full-text downloads.
+"""Small, read-only metadata adapters; no full-text downloads.
 
 Crossref: https://www.crossref.org/documentation/retrieve-metadata/rest-api/
 Europe PMC: https://europepmc.org/RestfulWebService
+OpenAlex: https://help.openalex.org/data/works/
+An optional OpenAlex key is used only in the Authorization header.
 Only explicit query / DOI / optional contact values are sent to these services.
 """
 from __future__ import annotations
@@ -13,19 +15,55 @@ import math
 import re
 import socket
 import time
+import threading
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit, unquote
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
 
 
 CROSSREF_BASE = "https://api.crossref.org/works"
 EUROPE_PMC_BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+OPENALEX_BASE = "https://api.openalex.org/works"
+CORE_BASE = 'https://api.core.ac.uk/v3/search/works'
+SEMANTIC_BASE = 'https://api.semanticscholar.org/graph/v1/paper/search'
+CREDENTIALS = {'OpenAlex': ('api.openalex.org','Authorization','Bearer '),
+               'CORE': ('api.core.ac.uk','Authorization','Bearer '),
+               'Semantic Scholar': ('api.semanticscholar.org','x-api-key','')}
+_PACE_LOCK = threading.Lock()
+_LAST_STARTED = {}
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 class AdapterError(RuntimeError):
     """A readable error that the caller can log without losing other sources."""
+    def __init__(self, message, http_status=None, retry_after_seconds=None):
+        super().__init__(message)
+        self.http_status=http_status
+        self.retry_after_seconds=retry_after_seconds
+
+
+class _OpenAlexRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parsed=urlsplit(newurl)
+        if parsed.scheme!='https' or parsed.hostname!='api.openalex.org':
+            return None
+        return super().redirect_request(req,fp,code,msg,headers,newurl)
+
+
+class _CredentialRedirect(HTTPRedirectHandler):
+    def __init__(self,host):super().__init__();self.host=host
+    def redirect_request(self,req,fp,code,msg,headers,newurl):
+        p=urlsplit(newurl)
+        if p.scheme!='https' or p.hostname!=self.host:return None
+        return super().redirect_request(req,fp,code,msg,headers,newurl)
+
+
+def provider_key(value,provider):
+    value=str(value or '').strip()
+    if value and (len(value)>4096 or any(ord(c)<33 or ord(c)>126 for c in value)):
+        raise ValueError(provider+' Key 中含空格、换行或不支持的字符。')
+    return value
 
 
 class _PlainTextParser(HTMLParser):
@@ -103,15 +141,27 @@ def _contact(contact: str) -> str:
     return contact
 
 
-def _get_json(base: str, params: dict[str, Any], provider: str, contact: str, timeout: float) -> dict[str, Any]:
+def _get_json(base: str, params: dict[str, Any], provider: str, contact: str, timeout: float, api_key: str = '') -> dict[str, Any]:
     url = base + ("?" + urlencode(params) if params else "")
     agent = "CuZn-LiteratureGateway/0.1 (metadata-only research prototype)"
     if contact:
         agent += f" (mailto:{contact})"
     request = Request(url, headers={"Accept": "application/json", "User-Agent": agent})
+    if api_key:
+        auth=CREDENTIALS.get(provider)
+        if not auth or urlsplit(base).scheme!='https' or urlsplit(base).hostname!=auth[0]:
+            raise ValueError(provider+' Key 仅用于该平台官方 HTTPS 接口。')
+        request.add_header(auth[1],auth[2]+provider_key(api_key,provider))
+    opener=build_opener(_OpenAlexRedirect() if provider=='OpenAlex' else _CredentialRedirect(CREDENTIALS[provider][0])).open if api_key else urlopen
+    interval={'CORE':2.1,'Semantic Scholar':1.1}.get(provider,0)
+    if interval:
+        with _PACE_LOCK:
+            delay=interval-(time.monotonic()-_LAST_STARTED.get(provider,0))
+            if delay>0:time.sleep(delay)
+            _LAST_STARTED[provider]=time.monotonic()
     for attempt in range(3):
         try:
-            with urlopen(request, timeout=timeout) as response:
+            with opener(request, timeout=timeout) as response:
                 payload = response.read(MAX_RESPONSE_BYTES + 1)
             if len(payload) > MAX_RESPONSE_BYTES:
                 raise AdapterError(f"{provider} 返回内容超过 8 MB，已停止读取；请减小检索条数。")
@@ -120,6 +170,21 @@ def _get_json(base: str, params: dict[str, Any], provider: str, contact: str, ti
                 raise AdapterError(f"{provider} 返回的 JSON 格式与预期不符。")
             return data
         except HTTPError as exc:
+            if provider=='OpenAlex' and exc.code in (401,403,429):
+                retry=exc.headers.get('Retry-After','') if exc.headers else ''
+                try:delay=float(retry)
+                except ValueError:delay=None
+                hint=('当前网络的匿名共享额度不足或已限流；可填写自己的OpenAlex Key，或稍后重试。'
+                      if exc.code==429 and not api_key else
+                      '本次OpenAlex Key的额度不足或请求受限；未继续重试。' if exc.code==429 else
+                      'OpenAlex授权未通过，请核对OpenAlex Key；不要填Elsevier Key。')
+                raise AdapterError(f'OpenAlex HTTP {exc.code}：{hint}',exc.code,delay) from None
+            if provider in ('CORE','Semantic Scholar') and exc.code in (401,403,429):
+                delay=exc.headers.get('Retry-After','') if exc.headers else ''
+                try:delay=float(delay)
+                except ValueError:delay=None
+                hint='请求限流；可填本平台 Key 或稍后重试，本批暂停该来源。' if exc.code==429 else '访问被拒绝；请核对本平台 Key 和访问方案，本批暂停该来源。'
+                raise AdapterError(f'{provider} HTTP {exc.code}：{hint}',exc.code,delay) from None
             if exc.code == 429 and attempt < 2:
                 retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
                 try:
@@ -136,12 +201,79 @@ def _get_json(base: str, params: dict[str, Any], provider: str, contact: str, ti
                 404: "未找到此记录或接口；DOI 可能不由 Crossref 登记。",
                 429: "请求频率受限；已停止自动重试，请稍后再试。",
             }
-            raise AdapterError(f"{provider} HTTP {exc.code}：{hints.get(exc.code, '服务异常，请稍后重试。')}") from exc
+            raise AdapterError(f"{provider} HTTP {exc.code}：{hints.get(exc.code, '服务异常，请稍后重试。')}",exc.code) from None
         except (URLError, TimeoutError, socket.timeout) as exc:
-            raise AdapterError(f"{provider} 连接失败或超过 {timeout:g} 秒：请检查网络后重试。") from exc
+            raise AdapterError(f"{provider} 连接失败或超过 {timeout:g} 秒：请检查网络后重试。") from None
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise AdapterError(f"{provider} 未返回有效 JSON；可能是服务或网络代理异常。") from exc
     raise AdapterError(f"{provider} 请求失败。")
+
+
+def _discovery_record(provider,sid,title,abstract,doi_value,year,publisher='',journal='',url='',document_type='',candidates=None,**extra):
+    canonical=normalize_doi(doi_value)
+    abstract=plain_text(abstract)
+    warnings=[]
+    if not abstract:warnings.append('来源未提供摘要；不能仅因缺少摘要判定论文无关。')
+    if not canonical:warnings.append('来源未提供可规范化的 DOI。')
+    if candidates:warnings.append('全文链接是来源报告的候选；尚未实际下载并核对论文身份。')
+    return {'doi':canonical,'title':plain_text(title),'abstract':abstract,'year':year,
+            'publisher':plain_text(publisher),'journal':plain_text(journal),'url':url or ('https://doi.org/'+canonical if canonical else ''),
+            'sources':[provider],'source_ids':{provider:str(sid)},'document_type':plain_text(document_type),
+            'fulltext_candidates':candidates or [],'warnings':warnings,
+            'abstract_origin':provider+' 来源摘要' if abstract else '',
+            'abstract_source':{'provider':provider,'source_id':str(sid),'source_url':url,'method':'reported_abstract'} if abstract else {},**extra}
+
+
+def _core_record(item):
+    sid=str(item.get('id') or '')
+    identifiers=item.get('identifiers') or []
+    d=item.get('doi') or next((i.get('identifier') for i in identifiers if isinstance(i,dict) and i.get('type')=='doi'),'')
+    candidates=[]
+    urls=[item.get('downloadUrl'),*(item.get('sourceFulltextUrls') or [])]
+    for raw in urls:
+        url=_web_url(raw)
+        if url and not any(c['url']==url for c in candidates):
+            candidates.append({'url':url,'format':'application/pdf' if '.pdf' in urlsplit(url).path.lower() else 'unknown',
+                               'provider':'CORE','access_status':'open_access_reported'})
+    journals=item.get('journals') or []
+    journal=next((j.get('title') or j.get('name','') for j in journals if isinstance(j,dict)),'')
+    publisher=item.get('publisher') or ''
+    if isinstance(publisher,dict):publisher=publisher.get('name','')
+    if isinstance(publisher,list):publisher='; '.join(str(p) for p in publisher)
+    row=_discovery_record('CORE',sid,item.get('title'),item.get('abstract'),d,item.get('yearPublished'),publisher,journal,
+                             'https://core.ac.uk/works/'+sid,item.get('documentType') or '',candidates,
+                             repository_providers=item.get('dataProviders') or [])
+    if not item.get('documentType'):row['warnings'].append('CORE未报告文献类型，请核对期刊论文、预印本或学位论文。')
+    return row
+
+
+def search_core(query,limit=20,contact='',timeout=15,api_key=''):
+    query,limit,timeout=_validate(query,limit,timeout)
+    data=_get_json(CORE_BASE,{'q':query,'limit':limit},'CORE',_contact(contact),timeout,api_key=api_key)
+    if not isinstance(data.get('results'),list):raise AdapterError('CORE 响应缺少论文列表。')
+    return [_core_record(r) for r in data['results'][:limit] if isinstance(r,dict)]
+
+
+def _semantic_record(item):
+    sid=str(item.get('paperId') or '')
+    pdf=item.get('openAccessPdf') or {}
+    url=_web_url(pdf.get('url')) if isinstance(pdf,dict) else ''
+    candidates=[{'url':url,'format':'application/pdf','provider':'Semantic Scholar','access_status':'open_access_reported'}] if url else []
+    journal=item.get('journal') or {}
+    return _discovery_record('Semantic Scholar',sid,item.get('title'),item.get('abstract'),
+                            (item.get('externalIds') or {}).get('DOI'),item.get('year'),journal=journal.get('name',''),
+                            url='https://www.semanticscholar.org/paper/'+sid,
+                            document_type='; '.join(item.get('publicationTypes') or []),candidates=candidates)
+
+
+def search_semantic_scholar(query,limit=20,contact='',timeout=15,api_key=''):
+    query,limit,timeout=_validate(query,limit,timeout)
+    # Official relevance endpoint does not support hyphenated query terms.
+    effective=re.sub(r'(?<=\w)[\-–‑](?=\w)',' ',query)
+    fields='title,abstract,externalIds,journal,year,openAccessPdf,publicationTypes'
+    data=_get_json(SEMANTIC_BASE,{'query':effective,'limit':limit,'fields':fields},'Semantic Scholar',_contact(contact),timeout,api_key=api_key)
+    if not isinstance(data.get('data'),list):raise AdapterError('Semantic Scholar 响应缺少论文列表。')
+    return [dict(_semantic_record(r),provider_query=effective) for r in data['data'][:limit] if isinstance(r,dict)]
 
 
 def _web_url(value: Any) -> str:
@@ -192,7 +324,10 @@ def _crossref_record(item: dict[str, Any]) -> dict[str, Any]:
             "url": _web_url(item.get("URL")) or (f"https://doi.org/{doi}" if doi else ""),
             "sources": ["Crossref"], "source_ids": {"Crossref": doi},
             "document_type": plain_text(item.get("type")),
-            "fulltext_candidates": candidates, "warnings": warnings}
+            "fulltext_candidates": candidates, "warnings": warnings,
+            "abstract_origin": "Crossref登记摘要" if abstract else "",
+            "abstract_source": {"provider":"Crossref","source_id":doi,
+                                "source_url":CROSSREF_BASE+'/'+quote(doi,safe='')} if abstract else {}}
 
 
 def search_crossref(query: str, limit: int = 20, contact: str = "", timeout: float = 15) -> list[dict[str, Any]]:
@@ -282,7 +417,10 @@ def _europe_pmc_record(item: dict[str, Any]) -> dict[str, Any]:
             "url": f"https://europepmc.org/article/{quote(source, safe='')}/{quote(source_id, safe='')}" if source and source_id else (f"https://doi.org/{doi}" if doi else ""),
             "sources": ["Europe PMC"], "source_ids": source_ids,
             "document_type": "; ".join(plain_text(value) for value in pub_types),
-            "fulltext_candidates": candidates, "warnings": warnings}
+            "fulltext_candidates": candidates, "warnings": warnings,
+            "abstract_origin": "Europe PMC摘要" if abstract else "",
+            "abstract_source": {"provider":"Europe PMC","source_id":f'{source}:{source_id}',
+                                "source_url":f'https://europepmc.org/article/{quote(source,safe="")}/{quote(source_id,safe="")}'} if abstract else {}}
 
 
 def search_europe_pmc(query: str, limit: int = 20, contact: str = "", timeout: float = 15) -> list[dict[str, Any]]:
@@ -306,3 +444,93 @@ def search_europe_pmc(query: str, limit: int = 20, contact: str = "", timeout: f
             break
         params["cursorMark"] = cursor
     return records[:limit]
+
+
+def _openalex_key(value):
+    value=str(value or '').strip()
+    if len(value)>4096 or any(ord(c)<33 or ord(c)>126 for c in value):
+        raise ValueError('OpenAlex Key包含空格或不支持的字符，请重新复制。')
+    return value
+
+
+def decode_openalex_abstract(index):
+    """Reconstruct a complete positional index; collisions/gaps are not repaired."""
+    if not index:
+        return ''
+    if not isinstance(index,dict) or len(index)>50000:
+        raise ValueError('摘要倒排索引格式无效。')
+    positions={}
+    for word, offsets in index.items():
+        if not isinstance(word,str) or not word.strip() or not isinstance(offsets,list) or not offsets:
+            raise ValueError('摘要词或位置列表无效。')
+        for offset in offsets:
+            if type(offset) is not int or not 0<=offset<50000:
+                raise ValueError('摘要位置不是有效整数。')
+            if offset in positions and positions[offset]!=word:
+                raise ValueError('摘要位置冲突，未拼接不确定的摘要。')
+            positions[offset]=word
+    if not positions or len(positions)!=max(positions)+1:
+        raise ValueError('摘要位置有缺口，未将不完整内容当成完整摘要。')
+    return ' '.join(positions[i] for i in range(len(positions)))
+
+
+def _openalex_record(item):
+    doi=normalize_doi(item.get('doi'))
+    work_id=str(item.get('id') or '')
+    warnings=[]
+    try:abstract=decode_openalex_abstract(item.get('abstract_inverted_index'))
+    except ValueError as exc:
+        abstract='';warnings.append('OpenAlex '+str(exc))
+    if not abstract:warnings.append('来源未提供有效摘要；需要补充原文后复核。')
+    if not doi:warnings.append('OpenAlex未提供可规范化的DOI。')
+    primary=item.get('primary_location') or {}
+    if not isinstance(primary,dict):primary={}
+    source=primary.get('source') or {}
+    if not isinstance(source,dict):source={}
+    locations=[item.get('best_oa_location'),primary]+(item.get('locations') or [])
+    candidates=[];seen=set()
+    for loc in locations:
+        if not isinstance(loc,dict) or loc.get('is_oa') is not True:continue
+        for field,format_ in (('pdf_url','application/pdf'),('landing_page_url','text/html')):
+            url=_web_url(loc.get(field))
+            if not url or url in seen:continue
+            seen.add(url)
+            candidates.append({'url':url,'format':format_,'provider':'OpenAlex',
+                               'access_status':'open_access_reported'})
+    if candidates:warnings.append('开放获取状态由OpenAlex报告；尚未实际下载验证，也不代表可任意再分发。')
+    try:year=int(item.get('publication_year'))
+    except (ValueError,TypeError):year=None
+    return {'doi':doi,'title':plain_text(item.get('title') or item.get('display_name')),'abstract':abstract,
+            'year':year,'publisher':plain_text(source.get('host_organization_name')),
+            'journal':plain_text(source.get('display_name')),
+            'url':_web_url(primary.get('landing_page_url')) or ('https://doi.org/'+doi if doi else _web_url(work_id)),
+            'sources':['OpenAlex'],'source_ids':{'OpenAlex':work_id},'document_type':plain_text(item.get('type')),
+            'fulltext_candidates':candidates,'warnings':warnings,
+            'abstract_origin':'OpenAlex倒排索引还原摘要' if abstract else '',
+            'abstract_source':{'provider':'OpenAlex','source_id':work_id,'source_url':_web_url(work_id),
+                               'method':'abstract_inverted_index'} if abstract else {}}
+
+
+def search_openalex(query, limit=20, contact='', timeout=15, api_key=''):
+    """Search title/abstract metadata, keeping provider-reported OA locations."""
+    query,limit,timeout=_validate(query,limit,timeout)
+    contact=_contact(contact);api_key=_openalex_key(api_key)
+    params={'search':query,'per-page':limit,
+            'select':'id,doi,title,publication_year,abstract_inverted_index,primary_location,best_oa_location,locations,type'}
+    if contact:params['mailto']=contact
+    data=_get_json(OPENALEX_BASE,params,'OpenAlex',contact,timeout,api_key=api_key)
+    items=data.get('results')
+    if not isinstance(items,list):raise AdapterError('OpenAlex响应缺少论文列表。')
+    return [_openalex_record(v) for v in items if isinstance(v,dict)][:limit]
+
+
+def lookup_openalex_doi(doi, contact='', timeout=15, api_key=''):
+    expected=normalize_doi(doi)
+    if not expected:raise ValueError('请输入完整DOI或doi.org链接。')
+    _,_,timeout=_validate(expected,1,timeout)
+    contact=_contact(contact);api_key=_openalex_key(api_key)
+    data=_get_json(OPENALEX_BASE+'/'+quote('https://doi.org/'+expected,safe=':/'),
+                   {'mailto':contact} if contact else {},'OpenAlex',contact,timeout,api_key=api_key)
+    record=_openalex_record(data)
+    if record['doi']!=expected:raise AdapterError('OpenAlex返回的DOI与请求不一致，未合并摘要。')
+    return record

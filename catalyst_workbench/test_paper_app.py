@@ -17,6 +17,8 @@ from test_paper_workspace import make_pdf, PAGE_ONE, PAGE_TWO
 
 class PaperAppTests(unittest.TestCase):
     def setUp(self):
+        self.assistant_patch=patch('semantic_assistant.automatic_enabled',return_value=False)
+        self.assistant_patch.start();self.addCleanup(self.assistant_patch.stop)
         self.reading_patch=patch.object(app.reading,'engine_ready',return_value=False)
         self.reading_patch.start();self.addCleanup(self.reading_patch.stop)
         self.temp=tempfile.TemporaryDirectory(prefix='paper_ui_')
@@ -100,8 +102,28 @@ class PaperAppTests(unittest.TestCase):
         snapshot=copy.deepcopy(self.gui.project)
         self.gui.adopt_semantics()
         dialog=self.root.grab_current()
-        self.assertIsNotNone(dialog);self.assertEqual(dialog.title(),'这句话准备如何使用')
+        self.assertIsNotNone(dialog);self.assertEqual(dialog.title(),'核对程序建议')
         self.assertEqual(snapshot,self.gui.project);dialog.destroy()
+
+    def test_assistant_dialog_hides_categories_and_saves_only_after_user_action(self):
+        import semantic_assistant as assistant
+        self.gui.extract(focus='semantic');self.pump()
+        evidence=next(e for e in self.gui.project['evidence'] if e['branch']=='semantic')
+        self.gui.semantic_tree.selection_set(evidence['evidence_id'])
+        self.gui.adopt_semantics();dialog=self.gui.adoption_dialog
+        self.assertEqual(dialog.details.winfo_manager(),'')
+        payload={'purpose':'explanation','summary_zh':'这是一个机理说明。','reason_zh':'建议保留原句解释。',
+                 'evidence_quote':evidence['quote'],'questions':[]}
+        with patch.object(assistant,'_request',return_value={'message':{'content':__import__('json').dumps(payload)}}):
+            dialog.ask_model();self.pump()
+        self.assertEqual(dialog.choice.get(),work.SEMANTIC_USES['explanation'])
+        self.assertEqual(evidence['review_status'],'unreviewed')
+        self.assertNotIn('semantic_adoption',evidence)
+        dialog.toggle_details();self.assertEqual(dialog.details.winfo_manager(),'pack')
+        dialog.reviewer.set('tester');dialog.save(True)
+        self.assertEqual(evidence['review_status'],'reviewed')
+        self.assertEqual(evidence['semantic_adoption']['purpose'],'explanation')
+        self.assertFalse(self.gui.project['records'])
 
     def test_numeric_home_shows_performance_and_keeps_raw_text_separate(self):
         self.gui.task_var.set(work.TASKS['scr_conversion']['title']);self.gui.change_task()

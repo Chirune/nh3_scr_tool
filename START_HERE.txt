@@ -1,0 +1,6 @@
+CatalystWorkbench 2026.10.15 - source edition
+
+Extract all files, install Python 3.11/3.12, then double-click OPEN_THIS.cmd.
+For use without installing Python, download the Windows portable release.
+Release notes: docs/workbench/RELEASE_2026.10.15.md
+No API keys, papers, models or private records are included.

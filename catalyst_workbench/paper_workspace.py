@@ -90,8 +90,40 @@ def save_project(project, check_revision=True):
 
 def verify_source(project):
     article=project['article']
-    if digest(article['local_pdf'])!=article['source_sha256']:
-        raise ValueError('原 PDF 已改变；本篇旧证据暂不导出，请重新接收并建立新论文档案。')
+    if digest(source_path(article))!=article['source_sha256']:
+        kind='XML' if article.get('source_kind')=='elsevier_xml' else 'PDF'
+        raise ValueError('原 '+kind+' 已改变；本篇旧证据暂不导出，请重新接收并建立新论文档案。')
+
+
+def source_path(article):
+    return article.get('local_xml') if article.get('source_kind')=='elsevier_xml' else article['local_pdf']
+
+
+def evidence_location(evidence):
+    return evidence.get('location_label') or ('第 '+str(evidence.get('page','?'))+' 页')
+
+
+def document_blocks(article):
+    if article.get('source_kind')=='elsevier_xml':
+        from gateway.elsevier_xml import read_xml
+        parsed=read_xml(article['local_xml'],article)
+        return [dict(b,page=b['block_index'],text_sha256=hashlib.sha256(b['text'].encode('utf8')).hexdigest()) for b in parsed['blocks']]
+    reader=PdfReader(article['local_pdf'])
+    if len(reader.pages)>1000:raise ValueError('单篇页数超过本框架处理上限，请先核对是否选中了合订本。')
+    blocks=[{'page':n,'text':p.extract_text() or ''} for n,p in enumerate(reader.pages,1)]
+    if article.get('page_basis')=='browser_reflowed_text':
+        for block in blocks:block.update(page_basis='browser_reflowed_text',location_label='浏览器排版件第 '+str(block['page'])+' 页（非出版社原版页码）')
+    return blocks
+
+
+def text_source_ref(project,number):
+    block=next((p for p in project.get('pages',[]) if p['page']==number),{})
+    ref={'source_sha256':project['article']['source_sha256'],'page':number}
+    if project['article'].get('page_basis')=='browser_reflowed_text':
+        ref.update(page_basis='browser_reflowed_text',source_url=project['article'].get('download_source_url',''))
+    if project['article'].get('source_kind')=='elsevier_xml':
+        ref.update(page=None,source_kind='elsevier_xml',block_index=number,xml_path=block.get('xml_path'),section=block.get('section'))
+    return ref
 
 
 def load_project(path):
@@ -107,14 +139,14 @@ def list_papers(screening_run=None,batch_path=None):
         batch=load_batch(batch_path)
         papers=[dict(p,batch_path=str(Path(batch_path).resolve())) for p in batch.get('papers',[])]
         return papers,batch.get('waiting',[])
-    intake=load_screened_input(screening_run)
+    intake=load_screened_input(screening_run,include_xml=True)
     papers=[dict(p,screening_run=str(Path(screening_run).resolve())) for p in intake['papers']]
     return papers,intake.get('waiting',[])
 
 
 def open_paper(paper,output_root):
     article=copy.deepcopy(paper)
-    actual=digest(article['local_pdf'])
+    actual=digest(source_path(article))
     if article.get('source_sha256') and actual!=article['source_sha256']:raise ValueError('接收的 PDF 已变化。')
     article['source_sha256']=actual
     key=stable_id(article.get('doi','').lower(),actual)
@@ -123,7 +155,7 @@ def open_paper(paper,output_root):
         project=load_project(root/'paper.json')
         # A new batch may refer to the same immutable PDF. Preserve evidence
         # and reviews; only refresh the routing metadata.
-        for field in ('batch_path','paper_id','screening_run','record_id','local_pdf'):
+        for field in ('batch_path','paper_id','screening_run','record_id','local_pdf','local_xml','source_kind','page_basis','download_source_url'):
             if article.get(field):project['article'][field]=article[field]
         save_project(project)
         return project
@@ -155,18 +187,17 @@ def extract_document(project):
     from paper_relations import relation_candidates
     from paper_semantic_facets import enrich_candidates
     from paper_semantic_audit import source_span_issues
-    reader=PdfReader(project['article']['local_pdf'])
-    if len(reader.pages)>1000:raise ValueError('单篇页数超过本框架处理上限，请先核对是否选中了合订本。')
+    blocks=document_blocks(project['article'])
     old={e['evidence_id']:e for e in project['evidence']}
     pages=[];new=[];flags=[]
     source_hash=project['article']['source_sha256'];references_started=False
-    for number,page in enumerate(reader.pages,1):
-        text=page.extract_text() or ''
+    for block in blocks:
+        number=block['page'];text=block['text']
         if len(text)>300000:
             text=text[:300000];flags.append(f'第 {number} 页超过文字上限，本次只读前 300000 字符。')
-        pages.append({'page':number,'text':text,'text_sha256':hashlib.sha256(text.encode('utf8')).hexdigest(),
+        pages.append({**block,'page':number,'text':text,'text_sha256':hashlib.sha256(text.encode('utf8')).hexdigest(),
                       'status':'text_ready' if len(text.strip())>=20 else 'needs_ocr'})
-        if len(text.strip())<20:flags.append(f'第 {number} 页文字层不足，等待扫描页 OCR；不表示本页没有数据。')
+        if len(text.strip())<20 and project['article'].get('source_kind')!='elsevier_xml':flags.append(f'第 {number} 页文字层不足，等待扫描页 OCR；不表示本页没有数据。')
         for match in re.finditer(r'(?im)^\s*(?:table\s*\d+[a-z]?|表\s*\d+)\b[^\n]*(?:\n[^\n]*){0,4}',text):
             new.append({'evidence_id':stable_id(source_hash,'table',number,match.start(),match.end()),
                 'branch':'text','kind':'table_passage','page':number,'quote':match.group(),
@@ -201,6 +232,25 @@ def extract_document(project):
             new.append({**item,'evidence_id':eid,'branch':'semantic','page':number,'quote':quote,'usable':False,
                         'source_ref':{'source_sha256':source_hash,'page':number,'extraction':item.get('extraction_method') or item.get('candidate_origin') or 'local_semantic_rules',
                                       'start':start,'end':end}})
+    project['pages']=pages
+    if project['article'].get('page_basis')=='browser_reflowed_text':
+        for item in new:
+            item['source_ref'].update(page_basis='browser_reflowed_text',source_url=project['article'].get('download_source_url',''))
+            item['location_label']='浏览器排版件第 '+str(item['page'])+' 页（非出版社原版页码）'
+    if project['article'].get('source_kind')=='elsevier_xml':
+        flags.extend(['XML 使用章节/段落定位，没有原版页码；图像读数需另行取得 PDF。'])
+        for item in new:
+            ref=text_source_ref(project,item['page'])
+            item['source_ref'].update(ref)
+            item.update(location_kind='xml_block',location_label=pages[item['page']-1]['location_label'])
+        for block in pages:
+            if block.get('kind')=='table':
+                text=block['text']
+                new.append({'evidence_id':stable_id(source_hash,'xml_table',block['xml_path']),
+                            'branch':'text','kind':'table_passage','page':block['page'],'quote':text,'start':0,'end':len(text),
+                            'review_status':'unreviewed','usable':False,'location_kind':'xml_block','location_label':block['location_label'],
+                            'source_ref':{**text_source_ref(project,block['page']),'extraction':'elsevier_xml_table'},
+                            'source_table':block['table'],'warnings':['原始表格行列和跨度已保留；样品、单位与条件尚待核对。']})
     kept=[e for e in project['evidence'] if e['branch']=='image' or e.get('manual_capture')]
     seen={e['evidence_id'] for e in kept}
     for item in new:
@@ -212,7 +262,7 @@ def extract_document(project):
             baseline=dict(prior)
             if prior.get('human_annotation'):baseline.update(prior.get('parser_interpretation',{}))
             if all(baseline.get(k)==item.get(k) for k in sensitive):
-                for key in ('review_status','reviewer','reviewed_at','review_note','human_annotation','parser_interpretation','semantic_adoption','previous_interpretation'):
+                for key in ('review_status','reviewer','reviewed_at','review_note','human_annotation','parser_interpretation','semantic_adoption','previous_interpretation','assistant_suggestion'):
                     if key in prior:item[key]=prior[key]
                 if prior.get('human_annotation'):
                     for key in ('sample_label','reference_sample','assertion_scope'):item[key]=prior.get(key,'')
@@ -248,7 +298,9 @@ def add_text_evidence(project,page,start,end,kind='text_passage'):
     if existing:return existing
     item={'evidence_id':eid,'branch':'text','kind':kind,'page':page,'start':start,'end':end,
           'quote':text[start:end],'review_status':'unreviewed','usable':False,'manual_capture':True,
-          'source_ref':{'source_sha256':project['article']['source_sha256'],'page':page,'start':start,'end':end},'warnings':[]}
+          'source_ref':{**text_source_ref(project,page),'start':start,'end':end},'warnings':[]}
+    if project['article'].get('source_kind')=='elsevier_xml':
+        item.update(location_kind='xml_block',location_label=project['pages'][page-1]['location_label'])
     project['evidence'].append(item);_event(project,'capture_text',eid);save_project(project)
     return item
 
@@ -263,6 +315,24 @@ def review_evidence(project,evidence_id,decision,reviewer):
         raise ValueError('这句话已决定不采用；若要恢复，请在“标注如何采纳”中修改决定。')
     item['review_status']=decision;item['reviewer']=reviewer.strip();item['reviewed_at']=now()
     _event(project,'review_evidence',{'id':evidence_id,'decision':decision},reviewer);save_project(project)
+
+
+def save_assistant_suggestion(project, evidence_id, suggestion):
+    """Save a source-bound proposal separately from any human decision."""
+    from semantic_assistant import validate_suggestion, SCHEMA
+    verify_source(project)
+    item=next(e for e in project['evidence'] if e['evidence_id']==evidence_id)
+    if item.get('stale') or item.get('branch')!='semantic':raise ValueError('请选择当前语义证据。')
+    if (suggestion.get('source_quote')!=item.get('quote') or suggestion.get('evidence_id')!=evidence_id
+            or suggestion.get('source_sha256')!=project['article']['source_sha256']):
+        raise ValueError('建议来源与本条证据不一致，未保存。')
+    validate_suggestion({k:suggestion.get(k) for k in SCHEMA['required']}, item)
+    page=next(p for p in project['pages'] if p['page']==item['page'])
+    if page['text'][item['start']:item['end']]!=item['quote']:raise ValueError('原文位置不一致，未保存建议。')
+    item['assistant_suggestion']=copy.deepcopy(suggestion)
+    _event(project,'save_assistant_suggestion',{'evidence_id':evidence_id,'backend':suggestion.get('backend'),'model':suggestion.get('model')})
+    save_project(project)
+    return item
 
 
 def set_semantic_adoption(project,evidence_id,purpose,reviewer,note,confirm=False):
@@ -301,6 +371,44 @@ def annotate_semantics(project,evidence_id,updates,reviewer,note):
     _event(project,'annotate_semantics',{'before':before,'after':copy.deepcopy(item)},reviewer);save_project(project)
 
 
+def _rebind_unchanged_image_drafts(project, current):
+    """Follow a new review export only for unchanged, still-draft point values.
+
+    Reviewed records and changed coordinates/calibrations retain stale sources
+    and require explicit review. This never approves a record or its context.
+    """
+    def identity(e):
+        ref=e.get('source_ref',{})
+        parts=tuple(ref.get(k) for k in ('session_id','point_id','calibration_id','figure_revision'))
+        return parts if all(v is not None and v!='' for v in parts) else None
+    grouped={}
+    for e in current.values():
+        key=identity(e)
+        if key:grouped.setdefault(key,[]).append(e)
+    known={e['evidence_id']:e for e in project['evidence']}
+    changes=[]
+    for record in project['records']:
+        if record.get('review_status')!='draft':continue
+        for old_id in list(record.get('evidence_ids',[])):
+            old=known.get(old_id)
+            if not old or old.get('branch')!='image' or not old.get('stale'):continue
+            replacements=grouped.get(identity(old),[])
+            if len(replacements)!=1:continue
+            new=replacements[0]
+            fields=('metric','value','value_high','unit','operator','sample_label','series_label','conditions')
+            if any(old.get(k)!=new.get(k) for k in fields):continue
+            if old.get('source_ref',{}).get('point_pixels')!=new.get('source_ref',{}).get('point_pixels'):continue
+            if old.get('source_ref',{}).get('source_sha256')!=new.get('source_ref',{}).get('source_sha256'):continue
+            before=copy.deepcopy(record)
+            new_id=new['evidence_id']
+            record['evidence_ids']=[new_id if eid==old_id else eid for eid in record['evidence_ids']]
+            role=record.setdefault('evidence_roles',{}).pop(old_id,'value')
+            record['evidence_roles'][new_id]=role
+            changes.append({'record_id':record['record_id'],'previous_evidence_id':old_id,'new_evidence_id':new_id,
+                            'before':before,'after':copy.deepcopy(record)})
+    return changes
+
+
 def refresh_images(project):
     from paper_image_bridge import read_image_evidence
     verify_source(project)
@@ -324,15 +432,21 @@ def refresh_images(project):
         previous=next((i for i,v in enumerate(project['evidence']) if v['evidence_id']==e['evidence_id']),None)
         if previous is None:project['evidence'].append(e)
         else:project['evidence'][previous]=e
+    rebound=_rebind_unchanged_image_drafts(project,current)
     project['image_warnings']=list(dict.fromkeys(result['warnings']))
     project['branch_status']['image']='ready' if current else 'waiting_for_readings'
-    _event(project,'refresh_image_evidence',{'points':len(current),'warnings':len(result['warnings'])})
+    _event(project,'refresh_image_evidence',{'points':len(current),'warnings':len(result['warnings']),
+                                          'unchanged_draft_source_updates':rebound})
     save_project(project)
     return project
 
 
 def ensure_image_batch(project,image_output_root,progress=None):
     article=project['article'];verify_source(project)
+    if article.get('page_basis')=='browser_reflowed_text':
+        raise ValueError('当前是浏览器可见正文排版件，不含可靠的原版曲线图；请取得并关联出版社原版 PDF 后读图。')
+    if article.get('source_kind')=='elsevier_xml':
+        raise ValueError('本档案是 XML 正文，没有可标定的原版图像；请取得并关联 PDF 后，从板块1打开 PDF 档案进行读图。')
     if article.get('batch_path') and Path(article['batch_path']).is_file():
         batch=load_batch(article['batch_path'])
         match=next((p for p in batch['papers'] if p['paper_id']==article['paper_id']),None)

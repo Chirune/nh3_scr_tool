@@ -1,5 +1,5 @@
 {
-  "version": "2026.10.09",
+  "version": "2026.10.15",
   "entry": "start_workbench.cmd",
   "modules": [
     "modules/stage1",
@@ -9,5 +9,8 @@
   "tutorial": "docs/workbench/tutorial.html",
   "data_directory": "runtime_data",
   "private_materials_included": false,
-  "new_model_trained": false
+  "new_model_trained": false,
+  "windows_entry": "CatalystWorkbench.exe",
+  "release_notes": "docs/workbench/RELEASE_2026.10.15.md",
+  "browser_extension_version": "0.3.1"
 }

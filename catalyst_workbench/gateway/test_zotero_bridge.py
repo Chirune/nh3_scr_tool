@@ -194,6 +194,31 @@ class ZoteroBridgeTests(unittest.TestCase):
             with self.assertRaises(bridge.BridgeError):
                 client.request(path)
 
+    def test_ris_exports_only_retained_unique_dois_and_cannot_inject_tags(self):
+        item = record()
+        item.update(title='Catalyst\nER  - injected', journal='Catalysis', year=2026,
+                    document_type='journal-article', abstract='Actual abstract.', abstract_status='available')
+        excluded = {**item, 'doi': DOI+'other', 'manual_decision': 'non_target'}
+        missing = {**item, 'doi': ''}
+        self.run['records'] = [item, dict(item), excluded, missing]
+        output = self.root / 'retained.ris'
+        result = bridge.export_retained_ris(self.run, output)
+        text = output.read_text(encoding='utf-8')
+        self.assertEqual(result['exported'], 1)
+        self.assertEqual(result['skipped_missing_doi'], 1)
+        self.assertEqual(text.count('\nER  - '), 1)
+        self.assertNotIn(DOI+'other', text)
+        self.assertIn('AB  - Actual abstract.', text)
+        self.assertIn('TI  - Catalyst ER - injected', text)
+        self.client.check.assert_not_called()
+
+    def test_ris_does_not_label_pdf_page_text_as_abstract(self):
+        self.run['records'][0].update(abstract='Whole first two pages', abstract_status='available',
+                                     abstract_origin='PDF 前两页文字；尚未单独定位摘要')
+        output = self.root / 'retained.ris'
+        bridge.export_retained_ris(self.run, output)
+        self.assertNotIn('AB  -', output.read_text(encoding='utf-8'))
+
 
 if __name__ == '__main__':
     unittest.main()

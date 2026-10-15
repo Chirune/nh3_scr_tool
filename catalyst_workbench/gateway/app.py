@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from workbench_paths import data_root
 import engine
 from rules import PROFILE_INFO
+from access_status import failure_text
 
 
 DECISIONS = {"target": "保留", "review": "待复核", "non_target": "排除"}
@@ -46,17 +47,19 @@ def fulltext_access_hint(record):
     if not record:
         return "先选择论文，查看全文获取方式。XML 按钮仅用于已接入的 Europe PMC 开放全文。"
     local = Path(record.get("local_path") or "")
+    if record.get('local_xml') and not record.get('local_path'):
+        return '已接收 XML 正文，可进入第二板块读取章节、段落和表格；图片读数仍需取得 PDF。'
     if local.suffix.lower() == ".pdf" and local.is_file():
         return "已有本地 PDF，可完成筛选后进入第二板块扫描图片，无需再次下载 XML。"
     acquisition=record.get('pdf_acquisition',{})
     if acquisition.get('message'):
-        return acquisition['message']+' 可点击顶部“自动获取 PDF → 进入第二板块”重试。'
+        return acquisition['message']+' 可点击顶部“自动获取正文 → 进入第二板块”重试。'
     if has_open_xml(record):
         return "顶部按钮会自动尝试获取 PDF 并交给图片扫描；也可单独获取 Europe PMC XML。"
     platform = (record.get("route") or {}).get("publisher_group") or "该论文"
     if platform == "Elsevier":
         return "可自动查找 Elsevier 的公开 PDF，也可在顶部“出版社 API 设置 / 验证”填写官方密钥。API 全文是否可取需实际验证学校权限；学校全文 / Zotero 接收仍可使用。"
-    return "保留论文后，点击顶部“自动获取 PDF → 进入第二板块”。程序会自动查找公开 PDF，保存并传给图片扫描。"
+    return "保留论文后，点击顶部“自动获取正文 → 进入第二板块”。程序会自动查找公开 PDF，保存并传给图片扫描。"
 
 
 class LiteratureApp:
@@ -87,8 +90,14 @@ class LiteratureApp:
         self.limit_var = tk.StringVar(value="10")
         self.source_vars = {
             "Crossref": tk.BooleanVar(value=True),
+            "OpenAlex": tk.BooleanVar(value=True),
             "Europe PMC": tk.BooleanVar(value=True),
+            "CORE": tk.BooleanVar(value=True),
+            "Semantic Scholar": tk.BooleanVar(value=True),
         }
+        self.enrich_var=tk.BooleanVar(value=True)
+        self.openalex_key=''
+        self.search_api_keys={}
         self.status_var = tk.StringVar(value="就绪。选择研究方向，或导入已有 DOI / 本地 PDF。")
         self.summary_var = tk.StringVar(value="尚未生成结果")
         self.description_var = tk.StringVar()
@@ -126,17 +135,17 @@ class LiteratureApp:
         ttk.Label(outer, text="板块 1：联网筛选 → 自动获取 PDF", style="Title.TLabel").pack(anchor="w")
         top_actions = ttk.Frame(outer)
         top_actions.pack(anchor="w", pady=(6, 4))
-        self.figure_button = ttk.Button(top_actions, text="自动获取 PDF → 进入第二板块", command=self._open_figures,
+        self.figure_button = ttk.Button(top_actions, text="获取正文：API / 浏览器", command=self._choose_fulltext,
                                        state="disabled", style="Figure.TButton")
         self.figure_button.pack(anchor="w")
         access_row=ttk.Frame(top_actions);access_row.pack(anchor='w',pady=(4,0))
-        self.zotero_button = ttk.Button(access_row, text="学校全文 / Zotero 接收", command=self._open_zotero)
+        self.zotero_button = ttk.Button(access_row, text="浏览器登录后采集", command=self._choose_fulltext)
         self.zotero_button.pack(side='left')
         self.api_button=ttk.Button(access_row,text='出版社 API 设置 / 验证',command=self._open_api)
         self.api_button.pack(side='left',padx=(8,0));self.controls.append((self.api_button,'normal'))
         ttk.Label(
             outer,
-            text="检索后保留论文，点击上方按钮：自动查找可获取的 PDF，下载成功后直接扫描图片。每篇获取状态会显示在列表中。",
+            text="保留论文后选择 API 或浏览器获取正文；失败时查看 HTTP 错误码，成功接收后进入第二板块核对数据。",
             style="Hint.TLabel",
             wraplength=1150,
         ).pack(anchor="w", pady=(3, 9))
@@ -174,7 +183,14 @@ class LiteratureApp:
             check = ttk.Checkbutton(source_row, text=name, variable=variable)
             check.pack(side="left", padx=(0, 12))
             self.controls.append((check, "normal"))
-        ttk.Label(source_row, text="来源表示检索入口；结果会另外识别出版平台。", style="Hint.TLabel").pack(side="left")
+        ttk.Label(search, text="来源表示检索入口；结果会另外识别出版平台。CORE、Semantic Scholar 支持匿名模式或独立Key。", style="Hint.TLabel").pack(anchor='w')
+        options=ttk.Frame(search);options.pack(fill='x',pady=(6,0))
+        enrich=ttk.Checkbutton(options,text='自动补齐缺失摘要',variable=self.enrich_var)
+        enrich.pack(side='left',padx=(0,12));self.controls.append((enrich,'normal'))
+        for title,command in (('检索平台 Key',self._configure_search_keys),('补齐已有结果的摘要',self._enrich_saved)):
+            button=ttk.Button(options,text=title,command=command)
+            button.pack(side='left',padx=(0,8));self.controls.append((button,'normal'))
+        ttk.Label(options,text='每批最多补查50个DOI；保留人工决定。',style='Hint.TLabel').pack(side='left')
         action_row = ttk.Frame(search)
         action_row.pack(fill="x", pady=(8, 0))
         for title, command in (
@@ -304,15 +320,15 @@ class LiteratureApp:
         def done(updated):
             self._show_run(updated)
             summary=updated.get('pdf_acquisition_summary',{})
-            message=f"保留 {summary.get('selected',0)} 篇：新获取 {summary.get('downloaded',0)} 篇，已有 {summary.get('available',0)} 篇，未取得 {summary.get('failed',0)} 篇。"
+            message=f"保留 {summary.get('selected',0)} 篇：新获取 PDF {summary.get('downloaded',0)} 篇，已有 PDF {summary.get('available',0)} 篇，XML 正文 {summary.get('xml_ready',0)} 篇，未取得 {summary.get('failed',0)} 篇。"
             if summary.get('cancelled'):
                 self.status_var.set(message+' 已停止；已获取的 PDF 会保留。再次点击可继续。')
             elif summary.get('ready',0):
                 self._launch_figures()
                 self.status_var.set(message+' 已进入第二板块单篇论文工作台；未取得的论文可在列表查看原因。')
             else:
-                self.status_var.set(message+' 暂无可扫描 PDF。')
-                messagebox.showinfo('本次尚未取得 PDF',message+'\n\n每篇原因见列表“PDF 获取”及下方详情。未打开空白图片工作台；可以更换论文或稍后重试。',parent=self.root)
+                self.status_var.set(message+' 暂无可读取的正文。')
+                self.root.after(250,self._choose_fulltext)
         client=getattr(self,'publisher_client',None)
         options={'publisher_client':client} if client is not None else {}
         self._start_job('正在自动获取保留论文的 PDF；完成后进入文字、语义和图片工作台……',
@@ -414,11 +430,15 @@ class LiteratureApp:
             messagebox.showinfo("检索词过多", "第一版每次支持 1–10 行检索词，请分批检索。", parent=self.root)
             return
         profile = self._profile()
+        openalex_key=self.openalex_key
+        search_keys=dict(self.search_api_keys)
+        enrich=self.enrich_var.get()
         self._start_job(
             "正在联网检索；每次任务都会保存到独立结果文件夹……",
             lambda: engine.run_search(
                 profile, queries=queries, limit=limit, providers=providers,
                 output_root=self.output_root, progress=self._progress, cancel_event=self.cancel_event,
+                enrich_abstracts=enrich,openalex_api_key=openalex_key,search_api_keys=search_keys,
             ),
             self._show_run,
         )
@@ -444,18 +464,74 @@ class LiteratureApp:
                 messagebox.showinfo("尚未填写", "请粘贴至少一个 DOI。", parent=dialog)
                 return
             profile = self._profile()
+            openalex_key=self.openalex_key
+            enrich=self.enrich_var.get()
             dialog.destroy()
             self._start_job(
                 "正在识别 DOI 并获取文献信息……",
                 lambda: engine.run_dois(
                     profile, doi_text, output_root=self.output_root,
                     progress=self._progress, cancel_event=self.cancel_event,
+                    enrich_abstracts=enrich,openalex_api_key=openalex_key,
                 ),
                 self._show_run,
             )
 
         ttk.Button(row, text="开始导入并初筛", command=submit).pack(side="right")
         ttk.Button(row, text="取消", command=dialog.destroy).pack(side="right", padx=8)
+
+    def _configure_openalex(self):
+        if self.busy:return
+        dialog=tk.Toplevel(self.root);dialog.title('OpenAlex 摘要检索');dialog.geometry('560x260')
+        dialog.transient(self.root);dialog.grab_set()
+        ttk.Label(dialog,text='可选：填写自己的 OpenAlex Key。留空时使用公网共享额度。\n与 Elsevier Key 不同；仅本次会话使用，不写入结果或配置文件。',
+                  wraplength=510,padding=16).pack(anchor='w')
+        value=tk.StringVar(value=self.openalex_key)
+        entry=ttk.Entry(dialog,textvariable=value,show='●');entry.pack(fill='x',padx=16,pady=8)
+        def save():
+            from adapters import _openalex_key
+            try:self.openalex_key=_openalex_key(value.get())
+            except ValueError as exc:
+                messagebox.showinfo('检查Key',str(exc),parent=dialog);return
+            value.set('');dialog.destroy()
+            self.status_var.set('OpenAlex Key已用于本次会话。' if self.openalex_key else 'OpenAlex使用匿名共享额度。')
+        buttons=ttk.Frame(dialog,padding=16);buttons.pack(fill='x')
+        ttk.Button(buttons,text='获取Key说明',command=lambda:webbrowser.open('https://help.openalex.org/api/authentication/')).pack(side='left')
+        ttk.Button(buttons,text='保存到本次会话',command=save).pack(side='right')
+        entry.focus_set()
+
+    def _enrich_saved(self):
+        if self.busy:return
+        if not self.run:
+            messagebox.showinfo('先打开结果','请先检索，或打开已保存结果，再补齐摘要。',parent=self.root);return
+        current=self.run;key=self.openalex_key
+        self._start_job('正在补齐摘要；已有人工决定和PDF关联会保留……',
+            lambda:engine.enrich_existing_run(current,openalex_api_key=key,progress=self._progress,cancel_event=self.cancel_event),
+            self._show_run)
+
+    def _configure_search_keys(self):
+        if self.busy:return
+        from adapters import provider_key
+        dialog=tk.Toplevel(self.root);dialog.title('检索平台凭据（仅本次）');dialog.geometry('760x400')
+        box=ttk.Frame(dialog,padding=18);box.pack(fill='both',expand=True);box.columnconfigure(1,weight=1)
+        ttk.Label(box,text='各平台分别填写自己的 Key；留空可尝试匿名模式。\n只保留在本次内存中，不写入配置、缓存和导出文件。',wraplength=690).grid(row=0,column=0,columnspan=3,sticky='w',pady=(0,14))
+        forms={}
+        links={'OpenAlex':'https://help.openalex.org/api/authentication/',
+               'CORE':'https://core.ac.uk/services/api',
+               'Semantic Scholar':'https://www.semanticscholar.org/product/api'}
+        for i,(name,url) in enumerate(links.items(),1):
+            ttk.Label(box,text=name).grid(row=i,column=0,sticky='w',padx=(0,12),pady=8)
+            value=self.openalex_key if name=='OpenAlex' else self.search_api_keys.get(name,'')
+            forms[name]=tk.StringVar(value=value)
+            ttk.Entry(box,textvariable=forms[name],show='*').grid(row=i,column=1,sticky='ew',pady=8)
+            ttk.Button(box,text='申请 / 说明',command=lambda u=url:webbrowser.open(u)).grid(row=i,column=2,padx=8)
+        def save():
+            try:values={name:provider_key(var.get(),name) for name,var in forms.items()}
+            except ValueError as exc:messagebox.showinfo('检查Key',str(exc),parent=dialog);return
+            self.openalex_key=values.pop('OpenAlex');self.search_api_keys=values
+            for var in forms.values():var.set('')
+            dialog.destroy();self.status_var.set('检索凭据已应用到本次会话。')
+        ttk.Button(box,text='应用到本次会话',command=save).grid(row=4,column=0,columnspan=3,pady=16)
 
     def _local_pdfs(self, folder=None):
         if self.busy:
@@ -513,6 +589,7 @@ class LiteratureApp:
         self.summary_var.set(
             f"{run.get('profile_title') or PROFILE_INFO.get(run.get('profile'), {}).get('title', '当前结果')}"
             f"　｜　共 {len(self.records)} 篇　保留 {counts['target']}　待复核 {counts['review']}　排除 {counts['non_target']}"
+            f"　｜　摘要已取得 {sum(r.get('abstract_status')=='available' for r in run['records'])}　缺失 {sum(r.get('abstract_status')=='missing' for r in run['records'])}"
             +(f"　｜　可扫描 PDF {sum(bool(r.get('local_path')) and Path(r['local_path']).is_file() for r in run['records'] if (r.get('manual_decision') or r.get('effective_decision')) == 'target')} 篇"
               if run.get('pdf_acquisition_summary') or run.get('zotero_sync_summary') else '')
         )
@@ -567,10 +644,13 @@ class LiteratureApp:
                 ("标题", record.get("title")),
                 ("DOI", record.get("doi") or "未取得 DOI；不要仅因此排除论文"),
                 ("PDF 获取状态", self._pdf_status(record)),
+                ("API HTTP 错误", failure_text(record)),
                 ("PDF 获取说明", record.get('pdf_acquisition',{}).get('message')),
                 ("PDF 获取来源", record.get('pdf_acquisition',{}).get('source_url')),
                 ("Zotero 接收说明", record.get('zotero_transfer',{}).get('message')),
                 ("自动保存位置", record.get('local_path')),
+                ("XML 正文位置", record.get('local_xml')),
+                ("XML 获取说明", record.get('xml_acquisition',{}).get('message')),
                 ("自动初筛", DECISIONS.get(automatic, automatic)),
                 ("人工判定", DECISIONS.get(manual, manual) if manual else "尚未人工判定"),
                 ("判断理由", screen.get("reason")),
@@ -582,7 +662,9 @@ class LiteratureApp:
                 ("优先关注", screen.get("priority_focus")),
                 ("筛选证据", screen.get("evidence")),
                 ("摘要 / 本地提取内容", record.get("abstract") or "未取得摘要；需要查看原文。"),
+                ("摘要状态", {'available':'已取得','missing':'缺失，待复核','local_excerpt':'PDF片段，尚未单独定位摘要'}.get(record.get('abstract_status'),'待核对')),
                 ("文字来源", record.get("abstract_origin")),
+                ("摘要出处", record.get("abstract_source")),
                 ("需要注意", record.get("warnings")),
                 ("检索来源", record.get("sources")),
                 ("期刊", record.get("journal")),
@@ -616,6 +698,14 @@ class LiteratureApp:
             self.status_var.set(f"已保存人工判定：{DECISIONS[decision]}。对应导出结果已更新。")
 
         self._start_job("正在保存人工判定……", save, done, cancellable=False)
+
+    def _choose_fulltext(self):
+        if self.busy:return
+        from access_ui import AccessWindow
+        previous=getattr(self,'access_window',None)
+        if previous is not None and not previous.closed:
+            previous.refresh();previous.window.lift()
+        else:self.access_window=AccessWindow(self)
 
     def _open_zotero(self):
         from zotero_ui import ZoteroWindow
@@ -713,6 +803,7 @@ def main(argv=None):
     parser.add_argument("--profile", choices=list(PROFILE_INFO), default="scr_ammonia", help="研究方向")
     parser.add_argument('--paper-output-root',type=Path,help='本次流程的单篇论文输出目录')
     parser.add_argument('--image-output-root',type=Path,help='本次流程的图片输出目录')
+    parser.add_argument('--choose-access',action='store_true',help='载入结果后打开 API / 浏览器选择窗口')
     parser.add_argument("--smoke", action="store_true", help="创建并隐藏界面，完成本地启动检查后退出")
     args = parser.parse_args(argv)
     root = tk.Tk()
@@ -752,6 +843,7 @@ def main(argv=None):
         root.after(150, lambda: app.load_path(args.load_run))
     elif args.pdf_folder:
         root.after(150, lambda: app._local_pdfs(args.pdf_folder))
+    if args.choose_access:root.after(500,app._choose_fulltext)
     root.mainloop()
     return 0
 

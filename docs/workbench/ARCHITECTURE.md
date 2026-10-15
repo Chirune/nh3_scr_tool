@@ -1,6 +1,6 @@
 # 三板块代码地图与团队分工
 
-当前整合：2026.10.09。一个底层代码目录，三个独立入口，再加根目录整合入口。修改共享源码后，所有入口使用同一实现。
+当前整合：2026.10.15。一个底层代码目录，三个独立入口，再加根目录整合入口。修改共享源码后，所有入口使用同一实现。
 
 ```text
 start_workbench.py / .cmd       整合入口
@@ -57,3 +57,9 @@ scrtool/ + browser_extension/  组员原有采集与浏览器功能
 ## 协作方式
 
 为一项修改创建分支，限定负责的模块，提交前运行相关测试。说明触发问题、修改行为与验证结果。跨板块修改要核对上述交接文件；不要直接修改或提交个人科研输出。依赖变更需同步安装清单和验证记录。
+
+## 本地交付构建
+
+`python scripts/build_github_delivery.py --output <交付目录>` 生成完整源码包与 Windows 便携包；使用经过验证的 Windows Python 3.12 环境。便携包中的实际 Python 解释器保持原有子进程协议，`scripts/WindowsLauncher.cs` 编译为唯一 EXE 入口。此脚本不上传 GitHub。
+
+`scripts/build_current_release.py` 与 `build_workbench_exe.ps1` 是旧版构建方式，不用于本轮交付。

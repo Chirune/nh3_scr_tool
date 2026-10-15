@@ -106,6 +106,7 @@ def _base_record(record, index, profile, source_id):
         "download_source_url":record.get('pdf_acquisition',{}).get('source_url',''),
         "download_identity_validation":record.get('pdf_acquisition',{}).get('identity_check',''),
         "pdf_acquisition_status":record.get('pdf_acquisition',{}).get('status',''),
+        "page_basis":record.get('pdf_acquisition',{}).get('page_basis','publisher_pdf'),
     }
 
 
@@ -164,7 +165,7 @@ def _result(kind, run_path="", run_hash=""):
     }
 
 
-def load_screened_input(run_json, include_review=False) -> dict:
+def load_screened_input(run_json, include_review=False, *, include_xml=False) -> dict:
     """Read a gateway run without executing or importing gateway code.
 
     Explicit manual decisions take priority. Missing/unknown decisions wait for
@@ -240,6 +241,24 @@ def load_screened_input(run_json, include_review=False) -> dict:
             item["download_source_url"] = linked.get("source_url", "")
             item["download_identity_validation"] = linked.get("doi_validation", "")
         raw_path = record.get("local_path")
+        if not raw_path and include_xml and record.get('local_xml'):
+            try:
+                from gateway.elsevier_xml import read_xml
+                xml_path = _local_path(record['local_xml'], base=path.parent)
+                parsed = read_xml(xml_path, record)
+                if not record.get('xml_sha256') or parsed['sha256'] != record['xml_sha256']:
+                    raise IntakeError('XML 与接收时的来源不一致，请重新接收。')
+                item.update(local_xml=str(xml_path), source_kind='elsevier_xml', source_sha256=parsed['sha256'],
+                            title=item['title'] or parsed['title'],
+                            source_hash_status='matches_record', doi_status='verified_against_xml',
+                            download_identity_validation=parsed['identity_check'], block_count=len(parsed['blocks']),
+                            download_source_url=record.get('xml_acquisition',{}).get('source_url',''),
+                            requires_review=decision != 'target')
+                item['warnings'].extend(parsed['warnings'])
+                result['papers'].append(item)
+            except (ValueError, OSError) as exc:
+                result['waiting'].append(_wait(item,'xml_source_unavailable',str(exc)))
+            continue
         if not raw_path:
             acquisition=record.get('pdf_acquisition',{})
             if acquisition.get('message'):
@@ -253,6 +272,8 @@ def load_screened_input(run_json, include_review=False) -> dict:
             continue
         identity, reason_code, reason = _inspect_pdf(raw_path, path.parent, record.get("local_sha256"))
         item.update(identity)
+        if record.get('local_xml'):
+            item.update(local_xml=record['local_xml'], xml_sha256=record.get('xml_sha256',''))
         if reason_code:
             result["waiting"].append(_wait(item, reason_code, reason, supplied_local_path=_text(raw_path)))
             continue

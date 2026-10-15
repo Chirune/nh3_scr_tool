@@ -7,6 +7,7 @@ Neither metadata nor a login page is a successful PDF retrieval.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 from http.client import IncompleteRead
 import json
 from pathlib import Path
@@ -15,7 +16,7 @@ import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlencode, urljoin, urlsplit, urlunsplit
-from urllib.request import Request, build_opener
+from urllib.request import Request, build_opener, ProxyHandler
 import uuid
 
 from elsevier_api import (APIError, ElsevierClient, NoRedirect, _credential,
@@ -79,7 +80,8 @@ def same_credentials(client, key, token=''):
     if client is None:
         return False
     saved = getattr(client, '_secret', getattr(client, '_api_key', None))
-    return saved == key.strip() and getattr(client, '_insttoken', '') == token.strip()
+    secondary = getattr(client, '_metadata_key', getattr(client, '_insttoken', ''))
+    return saved == key.strip() and secondary == token.strip()
 
 
 class PublisherTransport:
@@ -113,12 +115,15 @@ class PublisherTransport:
         except ValueError:
             raise APIError('api_response', self.provider_label + ' 返回了尚未接入或不安全的地址，未继续请求。') from None
         try:
-            public_url(url)
+            self._validate_public_address(url)
         except FetchError:
             raise APIError('api_response', self.provider_label + ' 返回的地址不是公开论文站点。') from None
         except OSError:
             raise APIError('api_network', self.provider_label + ' 下载站点解析失败，请检查网络连接。') from None
         return url
+
+    def _validate_public_address(self, url):
+        public_url(url)
 
     def _headers(self, url, accept):
         headers = {'Accept': accept, 'User-Agent': 'CuZn-LiteratureGateway/0.4 TextDataMining'}
@@ -132,11 +137,13 @@ class PublisherTransport:
             delay = _retry_delay(headers)
             self._blocked_until = time.monotonic() + delay
             return APIError('api_rate_limit', label + ' 已限流或配额用尽，暂停该通道；不会连续重试。', code, delay)
-        if api_request and (code == 401 or (self.provider_id == 'wiley' and code in (400, 403))):
+        if api_request and (code == 401 or (self.provider_id == 'wiley' and code == 400)):
             self._invalid = True
             return APIError('api_authentication', label + f' 认证未通过（{code}），请检查对应出版社的 Key / Token；本次暂停该凭据。', code)
         if api_request and self.provider_id == 'wiley' and code == 404:
             return APIError('api_permission', 'Wiley 返回 404：可能没有该篇订阅权限、未从机构网络访问，或文章不可用；不能仅据此认定 DOI 不存在。', code)
+        if api_request and self.provider_id == 'wiley' and code == 403:
+            return APIError('api_permission', 'Wiley 拒绝本篇访问（403）：请核对 Token 登记状态、该篇权限和机构网络；其他论文仍可验证。', code)
         if code in (401, 403):
             return APIError('api_permission', label + f' 未允许这次访问（{code}），请核对接口方案、文章权限及下载入口。', code)
         if code == 404:
@@ -253,8 +260,30 @@ class WileyClient(PublisherTransport):
     api_host = 'api.wiley.com'
     domains = ('wiley.com',)
 
-    def __init__(self, token, *, opener=None, minimum_interval=10.1):
+    def __init__(self, token, *, opener=None, minimum_interval=10.1, use_system_proxy=False, use_official_sdk=True):
+        # The TDM endpoint determines institutional access by its request IP.
+        # Do not silently send it through a proxy configured for other services.
+        self._official_sdk=opener is None and use_official_sdk
+        self._use_system_proxy=use_system_proxy
+        if opener is None:
+            opener = build_opener(NoRedirect()) if use_system_proxy else build_opener(ProxyHandler({}), NoRedirect())
         super().__init__(token, opener=opener, minimum_interval=minimum_interval)
+
+    def _validate_public_address(self, url):
+        try:
+            public_url(url)
+        except FetchError:
+            # DNS-intercepting proxies may map Wiley's two fixed official
+            # endpoints into their RFC2544 fake-IP range. Permit that range
+            # only for those exact hosts; keep private/local DNS blocked.
+            host = urlsplit(url).hostname
+            if host not in ('api.wiley.com', 'alm.wiley.com'):
+                raise
+            public_url(url, resolve=False)
+            addresses = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
+            fake_range = ipaddress.ip_network('198.18.0.0/15')
+            if not addresses or any(address.version != 4 or address not in fake_range for address in addresses):
+                raise
 
     def fetch_pdf(self, record, run_dir, cancel_event=None, progress=None):
         if provider_for(record) != self.provider_id:
@@ -263,6 +292,26 @@ class WileyClient(PublisherTransport):
         url = 'https://api.wiley.com/onlinelibrary/tdm/v1/articles/' + quote(doi, safe='')
         if progress:
             progress('Wiley TDM：请求 PDF · ' + doi + '；连续请求至少间隔约 10 秒。')
+        if self._official_sdk:
+            from official_sdks import wiley_download
+            with self._lock:
+                if self._invalid:raise APIError('api_authentication','Wiley 本次凭据尚未通过认证。')
+                remaining=self._blocked_until-time.monotonic()
+                if remaining>0:raise APIError('api_rate_limit','Wiley 仍在限流等待期。',429,remaining)
+                while time.monotonic()-self._last_started<self._minimum_interval:
+                    if cancel_event is not None and cancel_event.is_set():raise Stopped()
+                    time.sleep(.1)
+                self._last_started=time.monotonic()
+                try:
+                    result=wiley_download(self._secret,doi,Path(run_dir)/'_sdk_temp',validate_url=self._validate_url,
+                                          cancel_event=cancel_event,use_system_proxy=self._use_system_proxy)
+                except ImportError:raise APIError('api_dependency','缺少 Wiley 官方客户端；请重新运行工作台依赖安装。') from None
+                except ValueError:raise APIError('api_authentication','Wiley 官方客户端要求有效的 UUID 格式 TDM Token。') from None
+                code=result['http_status']
+                if code and code!=200:raise self._http_error(code,result.get('headers',{}),True)
+                if not result.get('data'):raise APIError('api_network','Wiley 官方客户端未取得正文；请核对网络与访问权限。')
+                info=self._save(result['data'],record,run_dir,url,'wiley_tdm_api',cancel_event,client_backend='wiley-tdm official')
+                return info
         data, _, quota = self._request(url, 'application/pdf', MAX_PDF_BYTES, cancel_event, api_request=True)
         return self._save(data, record, run_dir, url, 'wiley_tdm_api', cancel_event, quota=quota)
 
@@ -287,8 +336,15 @@ class SpringerOAClient(PublisherTransport):
     api_host = 'api.springernature.com'
     domains = ('springernature.com', 'springer.com', 'nature.com', 'biomedcentral.com', 'springeropen.com')
 
-    def __init__(self, key, *, opener=None, minimum_interval=.7):
+    def __init__(self, key, meta_key='', *, opener=None, minimum_interval=.7,use_official_sdk=True):
+        self._official_sdk=opener is None and use_official_sdk
         super().__init__(key, opener=opener, minimum_interval=minimum_interval)
+        self._metadata_key = _credential(meta_key, 'Springer Meta API Key', False)
+        self._metadata_client = None
+        if self._metadata_key:
+            self._metadata_client = SpringerOAClient(self._metadata_key, opener=opener,
+                minimum_interval=minimum_interval, use_official_sdk=use_official_sdk)
+            self._metadata_client.provider_label = 'Springer Nature Meta API'
 
     def _asset_url(self, raw):
         if not isinstance(raw, str):
@@ -303,7 +359,43 @@ class SpringerOAClient(PublisherTransport):
         return self._validate_url(url)
 
     def _lookup(self, doi, collection, cancel_event=None):
+        if collection != 'openaccess':
+            if self._metadata_client is None:
+                raise APIError('api_metadata_key_missing',
+                    '元数据查询需另外填写 Meta API Key；不会把 Open Access Key 发送给 Meta API。')
+            return self._metadata_client._lookup_channel(doi, collection, cancel_event)
+        return self._lookup_channel(doi, collection, cancel_event)
+
+    def _lookup_channel(self, doi, collection, cancel_event=None):
         public_url = 'https://api.springernature.com/' + collection + '/json?' + urlencode({'q': 'doi:' + doi, 'p': 5})
+        if self._official_sdk:
+            from official_sdks import springer_search
+            if cancel_event is not None and cancel_event.is_set():raise Stopped()
+            with self._lock:
+                if self._invalid:raise APIError('api_authentication','Springer 本次凭据尚未通过认证。')
+                remaining=self._blocked_until-time.monotonic()
+                if remaining>0:raise APIError('api_rate_limit','Springer 仍在限流等待期。',429,remaining)
+                delay=self._minimum_interval-(time.monotonic()-self._last_started)
+                if delay>0:
+                    if cancel_event is not None:
+                        if cancel_event.wait(delay):raise Stopped()
+                    else:time.sleep(delay)
+                self._last_started=time.monotonic()
+                try:
+                    payload=springer_search(self._secret,'doi:'+doi,kind='openaccess' if collection=='openaccess' else 'meta',limit=5)
+                except ImportError:raise APIError('api_dependency','缺少 Springer 官方客户端；请重新运行工作台依赖安装。') from None
+                except Exception as exc:
+                    if type(exc).__name__=='RateLimitExceededError':
+                        raise self._http_error(429,{},True) from None
+                    cause=exc.__cause__;response=getattr(cause,'response',None)
+                    code=getattr(response,'status_code',None)
+                    if code:raise self._http_error(code,response.headers,True) from None
+                    raise APIError('api_network','Springer 官方客户端请求未完成，请核对网络和接口权限。') from None
+                if cancel_event is not None and cancel_event.is_set():raise Stopped()
+                records=payload.get('records')
+                if not isinstance(records,list) or any(not isinstance(r,dict) for r in records):
+                    raise SpringerLookupError('api_response','官方客户端未返回有效文章列表。',stage=collection)
+                return records,public_url,{}
         url = public_url + '&' + urlencode({'api_key': self._secret})
         data, _, quota = self._request(url, 'application/json', MAX_META_BYTES, cancel_event, api_request=True)
         try:

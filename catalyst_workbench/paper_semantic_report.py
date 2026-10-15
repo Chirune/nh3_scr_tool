@@ -91,6 +91,9 @@ def adoption_label(item):
     from paper_workspace import SEMANTIC_USES
     if item.get('stale'):return '旧判断，仅供追溯'
     if item.get('review_status') == 'excluded':return SEMANTIC_USES['exclude']
+    suggestion=item.get('assistant_suggestion',{})
+    if not item.get('semantic_adoption') and suggestion.get('source_quote')==item.get('quote') and suggestion.get('purpose') in SEMANTIC_USES:
+        return '建议：'+SEMANTIC_USES[suggestion['purpose']]+'（待核对）'
     return SEMANTIC_USES.get(item.get('semantic_adoption', {}).get('purpose'), SEMANTIC_USES['pending'])
 
 
@@ -169,7 +172,8 @@ def export_semantic_inventory(project):
             '中文参考译文（非原始证据）':aid['translation'],'翻译状态':aid['message'],
             '术语解释':'；'.join(t['term']+'：'+t['zh']+'。'+t['explanation'] for t in aid['terms']),
             '阅读核对提示':'；'.join(aid['hints']),'翻译模型':aid['model'],'译文原句指纹':aid['source_key'],
-            '页码':e.get('page'),'起始字符':e.get('start'),'结束字符':e.get('end'),
+            '页码':None if e.get('location_kind')=='xml_block' else e.get('page'),
+            '原文定位':e.get('location_label') or ('第 '+str(e.get('page'))+' 页'),'起始字符':e.get('start'),'结束字符':e.get('end'),
             '关系说明':e['relationship_summary'],'关系原始字段':e.get('relations',[]),
             '科研关系字段':e.get('semantic_facets',[]),'条件及角色':e.get('conditions_mentions',[]),
             '陈述性质':e.get('assertion_status',''),'复核提示':e['review_prompts'],'重复原句出处':e['repeated_statement_sources'],
@@ -195,7 +199,7 @@ def export_semantic_inventory(project):
         if aid['terms']:reading_note+='<p><b>本句术语</b></p><ul>'+''.join('<li>'+esc(t['term']+'：'+t['zh']+'。'+t['explanation'])+'</li>' for t in aid['terms'])+'</ul>'
         if aid['hints']:reading_note+='<p><b>对照时注意</b></p><ul>'+''.join('<li>'+esc(h)+'</li>' for h in aid['hints'])+'</ul>'
         reading_note+='</aside>'
-        cards.append('<article class="item"><header><b>'+str(index)+'. '+esc(' / '.join(e['facet_labels']) or e['kind_label'])+'</b><span>'+esc(e['kind_label'])+' · 第 '+esc(e.get('page'))+' 页 · '+esc(e['state_label'])+'</span></header>'
+        cards.append('<article class="item"><header><b>'+str(index)+'. '+esc(' / '.join(e['facet_labels']) or e['kind_label'])+'</b><span>'+esc(e['kind_label'])+' · '+esc(e.get('location_label') or ('第 '+str(e.get('page'))+' 页'))+' · '+esc(e['state_label'])+'</span></header>'
             +'<h3>'+esc(e.get('metric'))+'</h3><blockquote>'+esc(e.get('quote',''))+'</blockquote>'
             +reading_note
             +('<pre>'+esc(e['scientific_summary'])+'</pre>' if e['scientific_summary'] else '')

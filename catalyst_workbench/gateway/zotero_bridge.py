@@ -139,6 +139,39 @@ def _supplement(attachment):
     return bool(re.search(r'supporting\s+information|supplement(?:ary|al)|补充材料|(?:^|[_. -])(?:si|supp)(?:[_. -]|$)', text, re.I))
 
 
+def export_retained_ris(run, destination):
+    """Export known metadata only; importing/downloading remains in Zotero."""
+    rows, seen, skipped = [], set(), 0
+    for record in selected_records(run):
+        doi = canonical_doi(record.get('doi'))
+        if not doi:
+            skipped += 1
+            continue
+        if doi in seen:
+            continue
+        seen.add(doi)
+        # RIS is line-oriented. Source text cannot introduce a new RIS tag.
+        clean = lambda value: ' '.join(str(value or '').replace('\x00', '').split())
+        journal_type = str(record.get('document_type') or '').lower()
+        fields = [('TY', 'JOUR' if journal_type in ('journal-article', 'journalarticle', 'review', 'article') else 'GEN'),
+                  ('TI', record.get('title')), ('DO', doi), ('JO', record.get('journal')),
+                  ('PB', record.get('publisher'))]
+        year = str(record.get('year') or '')
+        if re.fullmatch(r'\d{4}', year):
+            fields.append(('PY', year))
+        fields.append(('UR', 'https://doi.org/' + doi))
+        # Local PDF first-page text is not a located abstract.
+        if record.get('abstract_status') == 'available' and not str(record.get('abstract_origin') or '').startswith('PDF'):
+            fields.append(('AB', record.get('abstract')))
+        rows.extend(f'{tag}  - {clean(value)}' for tag, value in fields if clean(value))
+        rows.extend(['ER  - ', ''])
+    if not seen:
+        raise BridgeError('没有可导出的保留论文；请先保留论文并核对 DOI。')
+    path = Path(destination)
+    path.write_text('\n'.join(rows) + '\n', encoding='utf-8')
+    return {'exported': len(seen), 'skipped_missing_doi': skipped, 'path': str(path.resolve())}
+
+
 def receive_record(record, run_dir, client, cancel_event=None):
     doi = canonical_doi(record.get('doi'))
     def result(status, message, **extra):

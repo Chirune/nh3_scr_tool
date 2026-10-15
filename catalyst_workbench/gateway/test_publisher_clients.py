@@ -57,7 +57,7 @@ class PublisherProtocolTests(unittest.TestCase):
 
     def springer(self, *responses):
         opener = Opener(*responses)
-        return pc.SpringerOAClient(KEY, opener=opener, minimum_interval=0), opener
+        return pc.SpringerOAClient(KEY, 'SYNTHETIC_META_KEY', opener=opener, minimum_interval=0), opener
 
     def test_wiley_uses_encoded_doi_and_token_header_with_verified_pdf(self):
         active, opener = self.wiley(Response(pdf_bytes(WILEY_DOI)))
@@ -77,6 +77,40 @@ class PublisherProtocolTests(unittest.TestCase):
         self.assertEqual(opener.calls[0].get_header('Wiley-tdm-client-token'), KEY)
         self.assertIsNone(opener.calls[1].get_header('Wiley-tdm-client-token'))
 
+    def test_wiley_alm_signed_redirect_keeps_token_off_binary_request_and_artifacts(self):
+        signed_url = 'https://alm.wiley.com/content/test?signature=temporary-download'
+        active, opener = self.wiley(api_failure(302, headers={'Location': signed_url}), Response(pdf_bytes(WILEY_DOI)))
+        result = active.fetch_pdf(paper('wiley'), self.folder)
+        self.assertIsNone(opener.calls[1].get_header('Wiley-tdm-client-token'))
+        self.assertNotIn('temporary-download', json.dumps(result))
+        self.assertEqual(result['doi_verified'], WILEY_DOI)
+
+    def test_wiley_default_transport_ignores_system_proxy(self):
+        with patch.object(pc, 'build_opener') as build:
+            pc.WileyClient(KEY)
+            handlers = build.call_args.args
+            self.assertTrue(any(isinstance(h, pc.ProxyHandler) and h.proxies == {} for h in handlers))
+        with patch.object(pc, 'build_opener') as build:
+            pc.WileyClient(KEY, use_system_proxy=True)
+            self.assertFalse(any(isinstance(h, pc.ProxyHandler) for h in build.call_args.args))
+
+    def test_wiley_fake_ip_only_for_fixed_endpoints(self):
+        with patch.object(pc, 'public_url', pdf_fetch.public_url), patch.object(pdf_fetch.socket, 'getaddrinfo',
+                return_value=[(2, 1, 6, '', ('198.18.0.8', 443))]):
+            active = pc.WileyClient(KEY)
+            for host in ('api.wiley.com', 'alm.wiley.com'):
+                self.assertEqual(active._validate_url('https://' + host + '/test'), 'https://' + host + '/test')
+            with self.assertRaises(pc.APIError):
+                active._validate_url('https://other.wiley.com/test')
+
+    def test_wiley_private_or_mixed_dns_is_still_rejected(self):
+        active = pc.WileyClient(KEY)
+        for addresses in (['127.0.0.1'], ['10.0.0.5'], ['198.18.0.8', '192.168.0.5'], ['::1']):
+            with self.subTest(addresses=addresses), patch.object(pc, 'public_url', pdf_fetch.public_url), patch.object(pdf_fetch.socket, 'getaddrinfo',
+                    return_value=[(2, 1, 6, '', (address, 443)) for address in addresses]):
+                with self.assertRaises(pc.APIError):
+                    active._validate_url('https://alm.wiley.com/test')
+
     def test_wiley_rejects_untrusted_and_secret_bearing_redirects(self):
         for target in ('http://api.wiley.com/file', 'https://wiley.com.evil.test/file',
                        'https://127.0.0.1/file', 'https://onlinelibrary.wiley.com/file?key=' + KEY):
@@ -86,13 +120,20 @@ class PublisherProtocolTests(unittest.TestCase):
                     active.fetch_pdf(paper('wiley'), self.folder)
                 self.assertEqual(len(opener.calls), 1)
 
-    def test_wiley_403_disables_token_but_404_keeps_article_access_diagnostic(self):
-        active, opener = self.wiley(api_failure(403))
+    def test_wiley_401_disables_token_but_403_and_404_keep_article_access_diagnostic(self):
+        active, opener = self.wiley(api_failure(401))
         for _ in range(2):
             with self.assertRaises(pc.APIError) as caught:
                 active.fetch_pdf(paper('wiley'), self.folder)
             self.assertEqual(caught.exception.status, 'api_authentication')
         self.assertEqual(len(opener.calls), 1)
+        active, opener = self.wiley(api_failure(403), Response(pdf_bytes(WILEY_DOI)))
+        with self.assertRaises(pc.APIError) as caught:
+            active.fetch_pdf(paper('wiley'), self.folder)
+        self.assertEqual(caught.exception.status, 'api_permission')
+        self.assertFalse(active._invalid)
+        self.assertEqual(active.fetch_pdf(paper('wiley'), self.folder)['status'], 'downloaded')
+        self.assertEqual(len(opener.calls), 2)
         active, _ = self.wiley(api_failure(404))
         with self.assertRaises(pc.APIError) as caught:
             active.fetch_pdf(paper('wiley'), self.folder)
@@ -459,10 +500,12 @@ class MultiPublisherInterfaceTests(unittest.TestCase):
             controls = [self.dialog.provider_box, self.dialog.apply_button, self.dialog.test_button,
                         self.dialog.article_button, self.dialog.school_button]
             if provider == 'springer': controls.append(self.dialog.probe_button)
+            if provider == 'elsevier': controls.extend([self.dialog.xml_test_button,self.dialog.xml_first_button])
             for control in controls:
-                self.assertTrue(control.winfo_ismapped())
-                self.assertLessEqual(control.winfo_rooty() - self.dialog.window.winfo_rooty() + control.winfo_height(), 650)
-                self.assertLessEqual(control.winfo_rootx() - self.dialog.window.winfo_rootx() + control.winfo_width(), 840)
+                with self.subTest(provider=provider,control=str(control)):
+                    self.assertTrue(control.winfo_ismapped())
+                    self.assertLessEqual(control.winfo_rooty() - self.dialog.window.winfo_rooty() + control.winfo_height(), 650)
+                    self.assertLessEqual(control.winfo_rootx() - self.dialog.window.winfo_rootx() + control.winfo_width(), 840)
 
     def test_key_probe_does_not_alter_selected_paper_or_run(self):
         import copy
@@ -480,7 +523,7 @@ class MultiPublisherInterfaceTests(unittest.TestCase):
         self.assertIn('没有下载PDF', self.dialog.result.get('1.0', 'end'))
 
     def test_school_button_opens_existing_receiver_without_saving_passwords(self):
-        with patch.object(self.owner, '_open_zotero') as opened:
+        with patch.object(self.owner, '_choose_fulltext') as opened:
             self.dialog.open_school()
             opened.assert_called_once_with()
 

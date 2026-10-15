@@ -360,7 +360,7 @@ def _project_for_packet(packet, file):
     source_hash = article.get('source_sha256', '')
     if not re.fullmatch(r'[a-fA-F0-9]{64}', str(source_hash)):
         raise ValueError('论文来源缺少有效 SHA256。')
-    source_file = Path(article.get('local_pdf') or '')
+    source_file = Path(workspace.source_path(article) or '')
     if not source_file.is_absolute():
         source_file = file.parent / source_file
     if _digest(source_file) != source_hash:
@@ -409,6 +409,12 @@ def _source_page_text(project, number, cache):
     from pypdf import PdfReader
     if isinstance(number, bool) or not isinstance(number, int) or number < 1:
         raise ValueError('原文页码无效。')
+    if project['article'].get('source_kind')=='elsevier_xml':
+        if 'xml_blocks' not in cache:
+            from paper_workspace import document_blocks
+            cache['xml_blocks']=document_blocks(project['article'])
+        if number>len(cache['xml_blocks']):raise ValueError('XML 段落定位超出原文件。')
+        return cache['xml_blocks'][number-1]['text']
     if 'reader' not in cache:
         cache['reader'] = PdfReader(project['article']['local_pdf'])
     if number > len(cache['reader'].pages):
@@ -512,6 +518,11 @@ def _record_reasons(project, row, current, live_evidence, frozen, image_state, s
             else:
                 try:
                     original = _source_page_text(project, entry['page'], source_text_cache)
+                    if project['article'].get('source_kind')=='elsevier_xml':
+                        block=source_text_cache['xml_blocks'][entry['page']-1]
+                        ref=entry.get('source_ref',{})
+                        if ref.get('xml_path')!=block['xml_path'] or ref.get('block_index')!=entry['page'] or ref.get('page') is not None:
+                            reasons.append('XML 证据的节点路径或段落定位与实际原文件不一致。')
                     if original[start:end] != entry['quote']:
                         reasons.append('原文证据与实际源 PDF 文字不一致，不能仅凭工作台缓存编码。')
                 except (OSError, ValueError, KeyError, TypeError, IndexError, PyPdfError) as exc:

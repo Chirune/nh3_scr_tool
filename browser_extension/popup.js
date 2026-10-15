@@ -62,9 +62,16 @@ function collectArticleSnapshot() {
     }
     if (article) break;
   }
-  let fulltext_html = "", figure_urls = [], table_count = 0;
+  let fulltext_html = "", fulltext_text = "", figure_urls = [], table_count = 0;
   if (article) {
+    fulltext_text = article.innerText || "";
     const copy = article.cloneNode(true);
+    const originals = [...article.querySelectorAll("*")];
+    const copied = [...copy.querySelectorAll("*")];
+    originals.forEach((node, i) => {
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden") copied[i]?.remove();
+    });
     for (const node of copy.querySelectorAll("script,style,nav,header,footer,aside,form,button,iframe,object,embed")) node.remove();
     for (const node of copy.querySelectorAll("*")) {
       for (const attr of [...node.attributes]) if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
@@ -96,7 +103,7 @@ function collectArticleSnapshot() {
     publisher: clean(first("citation_publisher", "dc.publisher")),
     date: first("citation_publication_date", "dc.date"), keywords: first("citation_keywords", "keywords"),
     document_type: first("citation_article_type", "dc.type"), captured_at: new Date().toISOString(),
-    fulltext_available: !!fulltext_html, fulltext_html, fulltext_sections: sections,
+    fulltext_available: !!fulltext_html, fulltext_html, fulltext_text, fulltext_sections: sections,
     figure_urls, table_count, pdf_urls, supplement_urls, import_issues: issues};
 }
 

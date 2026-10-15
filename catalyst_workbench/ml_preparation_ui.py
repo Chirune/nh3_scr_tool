@@ -34,7 +34,7 @@ class ModelPreparationPanel:
         self.recipes.bind('<<TreeviewSelect>>', lambda event: self.describe())
         box, self.detail = text_area(self.explanation, 16); box.pack(fill='both', expand=True)
         self.preview_summary = tk.StringVar(value='选择方案后点击“预览首个训练折的编码”。')
-        ttk.Label(self.preview_frame, textvariable=self.preview_summary, wraplength=940).pack(anchor='w', pady=5)
+        ttk.Label(self.preview_frame, textvariable=self.preview_summary, wraplength=940).pack(anchor='w', pady=2)
         box, self.matrix = table(self.preview_frame, [('empty', '此处显示真实编码变换结果；没有模型预测值')], [920], 9)
         box.pack(fill='both', expand=True)
         self.compact = False

@@ -107,7 +107,7 @@ class AcquisitionTests(unittest.TestCase):
 
 class AcquisitionUiTests(unittest.TestCase):
     def instance(self):
-        view=object.__new__(app.LiteratureApp);view.run={'records':[record()]};view.busy=False;view.root=None
+        view=object.__new__(app.LiteratureApp);view.run={'records':[record()]};view.busy=False;view.root=Mock()
         view._show_run=Mock();view._launch_figures=Mock();view.status_var=SimpleNamespace(set=Mock())
         view.cancel_event=threading.Event();view._progress=Mock();view._start_job=Mock()
         return view

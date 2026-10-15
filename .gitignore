@@ -41,6 +41,7 @@ node_modules/
 
 # Current shared workbench: local-only runs, models and private documents.
 /runtime_data/
+/核对本篇数据.cmd
 /local_models/
 /private/
 *.pptx

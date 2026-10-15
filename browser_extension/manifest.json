@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NH3-SCR 论文采集按钮",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "按需采集当前论文页的题录、摘要、可见正文和材料链接，并可使用浏览器下载 PDF。",
   "permissions": ["activeTab", "scripting", "downloads"],
   "action": {"default_title": "采集当前论文", "default_popup": "popup.html"}

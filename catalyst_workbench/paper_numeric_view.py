@@ -188,11 +188,13 @@ def export_numeric_inventory(project):
                      '区间上限': item.get('value_high'), '形式': item.get('operator'), '单位': item.get('unit'),
                      '样品': item.get('sample_label', ''), '归属对象': item['attribution_label'],
                      '归属说明': item['attribution_note'], '已有条件': item.get('conditions', {}),
-                     '缺失或限制': '；'.join(item['missing']), '页码': item.get('page'),
+                     '缺失或限制': '；'.join(item['missing']), '页码': None if item.get('location_kind')=='xml_block' else item.get('page'),
+                     '原文定位': item.get('location_label') or ('第 '+str(item.get('page'))+' 页'),
                      '表号': item.get('source_table', ''), '原句': item.get('quote', ''),
                      '不确定度': item.get('uncertainty', {}), '审核状态': item.get('review_status', 'unreviewed'),
                      '证据ID': item['evidence_id'], '其他出处': item['occurrences'],
-                     'DOI': project['article'].get('doi', ''), '源PDF指纹': project['article']['source_sha256'],
+                     'DOI': project['article'].get('doi', ''),
+                     ('源XML指纹' if project['article'].get('source_kind')=='elsevier_xml' else '源PDF指纹'): project['article']['source_sha256'],
                      '可直接用于训练': False})
     fields = list(rows[0]) if rows else ['用途', '指标', '原值', '单位', '页码', '原句', '可直接用于训练']
     _csv(folder / '本篇科学数值_待核对.csv', rows, fields)
@@ -205,7 +207,7 @@ def export_numeric_inventory(project):
     for item in report['rows']:
         tr.append('<tr>' + ''.join('<td>' + escape(value) + '</td>' for value in (
             item['role_label'], item['metric_label'], item['value_label'], item.get('unit'),
-            item['attribution_label'], '；'.join(item['missing']), item.get('page'), item.get('quote'))) + '</tr>')
+            item['attribution_label'], '；'.join(item['missing']), item.get('location_label') or item.get('page'), item.get('quote'))) + '</tr>')
     (folder / '00_本篇数值清单.html').write_text('''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>本篇数值提取清单</title>
 <style>body{font:16px "Microsoft YaHei",sans-serif;background:#f3f7f9;color:#183c4a;margin:32px}h1{font-size:26px}table{border-collapse:collapse;background:white;width:100%}th,td{padding:12px;border:1px solid #cfdae0;text-align:left;vertical-align:top}th{background:#155e75;color:white}p{line-height:1.7}.note{background:#fff1cc;padding:16px}td:last-child{min-width:300px;white-space:pre-wrap}a{color:#126b7d}</style>'''
         + '<h1>' + escape(project['article'].get('title')) + '</h1><p>' + escape(report['message'])

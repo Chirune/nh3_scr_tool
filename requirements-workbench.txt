@@ -3,4 +3,7 @@ numpy>=1.26,<3
 Pillow>=11,<13
 pypdf>=6,<7
 pypdfium2>=4.30,<6
+wiley-tdm==1.2.0
+springernature-api-client==0.0.10
+playwright==1.64.0
 # tkinter is included in the official Windows Python installer.

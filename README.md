@@ -1,26 +1,24 @@
 # 催化文献数据工作台 · 三板块整合版
 
-**当前共享版：2026.10.09。** 文献获取与筛选 → 单篇论文的文字、语义和图片核验 → 标准化、独立双评分与机器学习输入准备。
+**当前交付版：2026.10.15。** 文献获取与筛选 → 单篇论文的文字、语义和图片核验 → 标准化、独立双评分与机器学习输入准备。
 
 研究目标是把论文证据整理成可靠的数据，之后用催化剂配方和实验条件预测催化性能。当前已提供数据工作流；**尚未训练新预测模型，也没有新的预测准确率或已完成的DFT验证结果**。
 
 ## 从这里开始
 
-- **普通组员**：[下载最新整合包](https://github.com/Chirune/nh3_scr_tool/releases/latest/download/CatalystWorkbench-All-Latest.zip)，完整解压，双击 `start_workbench.cmd`。首次需Python 3.11/3.12及网络，用于安装本项目的独立依赖。
+- **普通组员**：从 GitHub Release 下载 `CatalystWorkbench-Windows-2026.10.15.zip`，完整解压后双击 `CatalystWorkbench.exe`，不需另装 Python。浏览器采集需已安装 Chrome。
+- **开发者**：下载 `CatalystWorkbench-All-Latest.zip` 或仓库源码，安装 Python 3.11/3.12 后双击 `OPEN_THIS.cmd`。
 - **使用教程**：[从首次安装到三个板块完整流程](docs/workbench/QUICKSTART.md)。离线图文目录为 `docs/workbench/tutorial.html`，也可从整合窗口打开。
 - **无需论文试用**：整合窗口点“无论文也能试：合成演示”。所有演示数据明确标为人工构造，不能用于科研训练。
 - **已有组员采集项目**：点“导入组员采集项目”选择 `project.json`；保留论文和人工筛选，接收唯一有效正文PDF，原项目不被修改。
 
-## 分板块与整合版
+## 本次交付
 
-| 版本 | 入口 / 说明 | 独立下载 |
-| --- | --- | --- |
-| 第一板块：文献获取与筛选 | [stage1](modules/stage1/) | [板块1包](https://github.com/Chirune/nh3_scr_tool/releases/latest/download/CatalystWorkbench-Stage1-Latest.zip) |
-| 第二板块：文字、语义、图像核验 | [stage2](modules/stage2/) | [板块2包](https://github.com/Chirune/nh3_scr_tool/releases/latest/download/CatalystWorkbench-Stage2-Latest.zip) |
-| 第三板块：编码、评分、模型准备 | [stage3](modules/stage3/) | [板块3包](https://github.com/Chirune/nh3_scr_tool/releases/latest/download/CatalystWorkbench-Stage3-Latest.zip) |
-| 三板块整合版 | 根目录 `start_workbench.cmd` | [整合包](https://github.com/Chirune/nh3_scr_tool/releases/latest/download/CatalystWorkbench-All-Latest.zip) |
+仅提供两个包：Windows 完整便携包，以及完整源码包。三个板块和浏览器插件都在包内，不需要分别下载四份。
 
-四个包使用同一版本底层代码。分板块包提供对应默认入口，同时携带交接和回看来源所需的共享组件。新入口没有内置个人论文或历史运行结果。
+[2026.10.15 新增功能与限制](docs/workbench/RELEASE_2026.10.15.md) · [API / 浏览器操作](docs/workbench/API_OR_BROWSER.md) · [本轮验证](docs/workbench/VALIDATION_2026.10.15.md)
+
+新版增加 API / 浏览器获取入口、实际 HTTP 错误显示、官方全文 XML 与多平台客户端、本机模型用途建议和 Zotero 衔接。Elsevier 403 尚未解决，候选证据仍需审核才能形成训练样本。
 
 ## 本版重点
 

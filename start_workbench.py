@@ -69,7 +69,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     missing = missing_packages(args.stage=='team')
     if args.check:
-        print(json.dumps({'ready':not missing,'missing':missing,'version':'2026.10.09'},ensure_ascii=False))
+        print(json.dumps({'ready':not missing,'missing':missing,'version':'2026.10.15'},ensure_ascii=False))
         return bool(missing)
     if missing:
         print('Missing: '+', '.join(missing)+'\nRun: py scripts/setup_workbench.py --team-tools')
@@ -82,7 +82,7 @@ def main(argv=None):
     root = tk.Tk()
     if args.smoke:
         root.withdraw()
-    root.title('催化文献数据工作台 · 最新整合版 2026.10.09')
+    root.title('催化文献数据工作台 · 最新整合版 2026.10.15')
     root.geometry('1120x780');root.minsize(950,690)
     root.tk.call('tk','scaling',min(float(root.tk.call('tk','scaling')),1.5))
     style = ttk.Style(root)

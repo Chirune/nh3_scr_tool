@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<full-text-retrieval-response xmlns="http://www.elsevier.com/xml/svapi/article/dtd" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:ce="http://www.elsevier.com/xml/common/dtd">
+  <coredata><dc:identifier>doi:10.1016/j.synthetic.2026.000001</dc:identifier><dc:title>Synthetic copper catalyst ammonia reduction fixture</dc:title><dc:description>Abstract only must not count as body.</dc:description></coredata>
+  <originalText><doc><article><body><ce:sections><ce:section id="sec1"><ce:section-title>Results (synthetic fixture)</ce:section-title>
+    <ce:para>In this study, sample S1 tested at 300 °C: NO conversion was 90%.</ce:para>
+    <ce:para>Sample S1 was Cu/CeO2; feed: 500 ppm NO, 500 ppm NH3, 5% O2 in N2. Space velocity was 40000 h-1. Symbols preserved: Å, ø, ±; NH<ce:inf>3</ce:inf>.</ce:para>
+    <ce:table id="tbl1"><ce:label>Table 1</ce:label><ce:caption>Synthetic performance table; not real research data.</ce:caption><tgroup cols="3"><colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/><thead><row><entry>Sample</entry><entry>Temperature (°C)</entry><entry>NO conversion (%)</entry></row></thead><tbody><row><entry morerows="1">S1</entry><entry>300</entry><entry>90 ± 1</entry></row><row><entry namest="c2" nameend="c3">Reported range; do not infer missing cells.</entry></row></tbody></tgroup></ce:table>
+  </ce:section></ce:sections></body><ce:bibliography><ce:bib-reference><ce:para>Previous paper: doi:10.1016/j.other.2026.999999; NO conversion was 95%.</ce:para></ce:bib-reference></ce:bibliography></article></doc></originalText>
+</full-text-retrieval-response>
